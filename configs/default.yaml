@@ -1,0 +1,29 @@
+# EOVOT default experiment configuration
+# ----------------------------------------
+# Copy and modify this file for each experiment.
+# Pass to the CLI with:  eovot --config configs/default.yaml
+
+experiment:
+  name: "baseline-mosse-otb"          # Unique experiment identifier
+  output_dir: "results/"              # Where to write JSON/CSV reports
+  seed: 42                            # RNG seed for reproducibility
+
+dataset:
+  name: "OTB100"                      # Dataset label used in reports
+  loader: "OTBDataset"                # Loader class name
+  root: "/data/OTB100"               # Path to dataset root directory
+  max_sequences: null                  # null = evaluate all sequences
+
+tracker:
+  name: "MOSSE"                       # Tracker class name
+  params:
+    learning_rate: 0.125              # EMA weight for filter update
+    sigma: 2.0                        # Gaussian response sigma (px)
+
+benchmark:
+  verbose: true                       # Print per-sequence progress
+  save_predictions: false             # Save per-frame bbox predictions
+
+reporting:
+  formats: ["json", "csv"]            # Output report formats
+  print_summary: true                 # Print table to stdout at the end
