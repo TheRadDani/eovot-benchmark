@@ -102,6 +102,10 @@ class MetricsEngine:
         print(result.success_auc)
     """
 
+    # ------------------------------------------------------------------ #
+    # Low-level helpers                                                    #
+    # ------------------------------------------------------------------ #
+
     def batch_iou(self, preds: np.ndarray, gts: np.ndarray) -> np.ndarray:
         """Vectorised per-frame IoU.
 
@@ -117,6 +121,10 @@ class MetricsEngine:
         for i in range(n):
             result[i] = iou(tuple(preds[i]), tuple(gts[i]))  # type: ignore[arg-type]
         return result
+
+    # ------------------------------------------------------------------ #
+    # Curve computation                                                    #
+    # ------------------------------------------------------------------ #
 
     def success_curve(
         self,
@@ -162,6 +170,10 @@ class MetricsEngine:
         rates = np.array([(dists < t).mean() for t in thresholds])
         return thresholds, rates
 
+    # ------------------------------------------------------------------ #
+    # Convenience: compute everything at once                              #
+    # ------------------------------------------------------------------ #
+
     def compute_all(
         self,
         preds: np.ndarray,
@@ -182,6 +194,7 @@ class MetricsEngine:
         success_auc = float(np.trapz(sr, thr_iou))
 
         thr_dist, pr = self.precision_curve(preds, gts)
+        # Normalise so perfect precision => 1.0
         prec_auc = float(np.trapz(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
 
         return AccuracyMetrics(

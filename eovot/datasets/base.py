@@ -27,19 +27,36 @@ from typing import Iterator, List, Tuple
 import cv2
 import numpy as np
 
+# Bounding box: (x, y, width, height)
 BBox = Tuple[float, float, float, float]
+
 _IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
 
 
 class Sequence:
-    """A single tracking sequence: ordered frames and per-frame ground truth."""
+    """A single tracking sequence: ordered frames and per-frame ground truth.
 
-    def __init__(self, name: str, frame_paths: List[str], ground_truth: np.ndarray) -> None:
+    Args:
+        name:         Human-readable sequence identifier.
+        frame_paths:  Ordered list of absolute paths to image files.
+        ground_truth: Array of shape ``(N, 4)`` with ``(x, y, w, h)`` rows.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        frame_paths: List[str],
+        ground_truth: np.ndarray,
+    ) -> None:
         if ground_truth.ndim != 2 or ground_truth.shape[1] != 4:
-            raise ValueError(f"ground_truth must be shape (N, 4), got {ground_truth.shape}")
+            raise ValueError(
+                f"ground_truth must be shape (N, 4), got {ground_truth.shape}"
+            )
         self.name = name
         self._frame_paths = frame_paths
-        self.ground_truth = ground_truth
+        self.ground_truth = ground_truth  # (N, 4)  x y w h
+
+    # ------------------------------------------------------------------ #
 
     def __len__(self) -> int:
         return len(self._frame_paths)
@@ -62,7 +79,12 @@ class Sequence:
 
 
 class BaseDataset(ABC):
-    """Abstract base class for dataset loaders."""
+    """Abstract base class for dataset loaders.
+
+    Concrete subclasses must implement :meth:`__len__` and
+    :meth:`__getitem__`, enabling iteration with a standard
+    ``for seq in dataset`` loop.
+    """
 
     @abstractmethod
     def __len__(self) -> int: ...
@@ -80,6 +102,10 @@ class BaseDataset(ABC):
 
 class OTBDataset(BaseDataset):
     """Loader for OTB-style tracking datasets.
+
+    Discovers sequences automatically by scanning ``root`` for
+    sub-directories that contain both an ``img/`` sub-directory and a
+    ``groundtruth_rect.txt`` file.
 
     Args:
         root: Path to the dataset root directory.
@@ -101,12 +127,17 @@ class OTBDataset(BaseDataset):
         self._entries: List[Tuple[str, str]] = self._discover()
 
     def _discover(self) -> List[Tuple[str, str]]:
+        """Return a sorted list of ``(sequence_name, sequence_dir)`` tuples."""
         entries = []
         for name in sorted(os.listdir(self.root)):
             seq_dir = os.path.join(self.root, name)
             gt_path = os.path.join(seq_dir, self._GT_FILENAME)
             img_dir = os.path.join(seq_dir, self._IMG_DIR)
-            if os.path.isdir(seq_dir) and os.path.isfile(gt_path) and os.path.isdir(img_dir):
+            if (
+                os.path.isdir(seq_dir)
+                and os.path.isfile(gt_path)
+                and os.path.isdir(img_dir)
+            ):
                 entries.append((name, seq_dir))
         return entries
 
@@ -117,12 +148,16 @@ class OTBDataset(BaseDataset):
         name, seq_dir = self._entries[idx]
         gt_path = os.path.join(seq_dir, self._GT_FILENAME)
         img_dir = os.path.join(seq_dir, self._IMG_DIR)
+
+        # Load ground truth — try comma delimiter first, fall back to whitespace
         try:
             gt = np.loadtxt(gt_path, delimiter=",")
         except ValueError:
             gt = np.loadtxt(gt_path)
+
         if gt.ndim == 1:
             gt = gt[np.newaxis, :]
+
         frame_paths = sorted(
             [
                 os.path.join(img_dir, f)
