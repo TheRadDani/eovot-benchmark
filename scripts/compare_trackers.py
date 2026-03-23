@@ -37,12 +37,33 @@ from pathlib import Path
 # Allow running as ``python scripts/compare_trackers.py`` from the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from eovot.benchmark.engine import BenchmarkConfig, BenchmarkEngine
+from eovot.benchmark.engine import BenchmarkEngine, BenchmarkResult
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
+from eovot.datasets.lasot import LaSOTDataset
 from eovot.reporting.reporter import BenchmarkReporter
 from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.mosse import MOSSETracker
+
+
+def _to_reporter_dict(result: BenchmarkResult, dataset_name: str) -> dict:
+    """Convert BenchmarkResult to the dict format expected by BenchmarkReporter."""
+    summary = result.summary()
+    # Reporter's to_markdown_row expects "tracker_name" and "dataset_name" keys
+    summary["tracker_name"] = summary.pop("tracker")
+    summary["dataset_name"] = dataset_name
+    summary.pop("dataset", None)
+    sequences = [
+        {
+            "sequence_name": sr.sequence_name,
+            "mean_iou": round(sr.mean_iou, 4),
+            "precision_score": 0.0,
+            "fps": round(sr.profiling.fps, 2),
+            "mean_latency_ms": round(sr.profiling.latency_mean_ms, 3),
+        }
+        for sr in result.sequence_results
+    ]
+    return {"summary": summary, "sequences": sequences}
 
 # ---------------------------------------------------------------------------
 # Registries — add new trackers / datasets here without touching the CLI code
@@ -56,6 +77,7 @@ TRACKER_REGISTRY = {
 DATASET_REGISTRY = {
     "OTBDataset": OTBDataset,
     "GOT10kDataset": GOT10kDataset,
+    "LaSOTDataset": LaSOTDataset,
 }
 
 
@@ -109,8 +131,7 @@ def main() -> None:
 
     dataset_name = args.dataset_name or args.dataset_loader
     reporter = BenchmarkReporter(output_dir=args.output_dir)
-    config = BenchmarkConfig(max_sequences=args.max_sequences, verbose=True)
-    engine = BenchmarkEngine(config=config)
+    engine = BenchmarkEngine(verbose=True)
 
     all_results = []
 
@@ -122,7 +143,7 @@ def main() -> None:
         tracker = TRACKER_REGISTRY[tracker_name]()
 
         dataset_cls = DATASET_REGISTRY[args.dataset_loader]
-        if args.dataset_loader == "GOT10kDataset":
+        if args.dataset_loader in ("GOT10kDataset", "LaSOTDataset"):
             dataset = dataset_cls(
                 root=args.dataset_root,
                 split=args.split,
@@ -131,17 +152,21 @@ def main() -> None:
         else:
             dataset = dataset_cls(root=args.dataset_root)
 
-        result = engine.run(tracker, dataset)
-        result["summary"].setdefault("dataset_name", dataset_name)
+        result = engine.run(
+            tracker, dataset,
+            dataset_name=dataset_name,
+            max_sequences=args.max_sequences,
+        )
+        result_dict = _to_reporter_dict(result, dataset_name)
 
-        reporter.print_summary(result)
+        reporter.print_summary(result_dict)
 
         run_name = f"{tracker_name}-{dataset_name}"
-        saved = reporter.save_all(result, name=run_name)
+        saved = reporter.save_all(result_dict, name=run_name)
         for fmt, path in saved.items():
             print(f"  [{fmt.upper()}] saved → {path}")
 
-        all_results.append(result)
+        all_results.append(result_dict)
 
     # -----------------------------------------------------------------------
     # Comparison table (only meaningful with 2+ trackers)
