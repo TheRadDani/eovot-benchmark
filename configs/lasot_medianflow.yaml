@@ -1,0 +1,35 @@
+# EOVOT experiment: MedianFlow tracker on LaSOT
+# -----------------------------------------------
+# Evaluates the MedianFlow optical-flow tracker on the LaSOT long-term
+# tracking benchmark.  LaSOT sequences average ~2,500 frames, making it
+# the hardest persistence challenge in this suite.
+#
+# Run with:
+#   python scripts/run_benchmark.py --config configs/lasot_medianflow.yaml
+
+experiment:
+  name: "medianflow-lasot-test"
+  output_dir: "results/"
+  seed: 42
+
+dataset:
+  name: "LaSOT-test"
+  loader: "LaSOTDataset"
+  root: "/data/LaSOT"              # Set to your local LaSOT root
+  max_sequences: null              # null = all sequences; set e.g. 20 for quick eval
+
+tracker:
+  name: "MedianFlow"
+  params:
+    grid_size: 10                  # 10x10 = 100 tracked feature points per frame
+    fb_threshold: 1.0              # Forward-backward error threshold (pixels)
+    lk_window: 21                  # Lucas-Kanade search window (pixels)
+    lk_levels: 3                   # LK pyramid levels
+
+benchmark:
+  verbose: true
+  save_predictions: false
+
+reporting:
+  formats: ["json", "csv"]
+  print_summary: true

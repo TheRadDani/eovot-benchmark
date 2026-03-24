@@ -32,7 +32,11 @@ import yaml
 
 from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
+from eovot.datasets.got10k import GOT10kDataset
+from eovot.datasets.lasot import LaSOTDataset
 from eovot.trackers.mosse import MOSSETracker
+from eovot.trackers.kcf import KCFTracker
+from eovot.trackers.medianflow import MedianFlowTracker
 
 
 # ------------------------------------------------------------------ #
@@ -41,6 +45,8 @@ from eovot.trackers.mosse import MOSSETracker
 
 TRACKER_REGISTRY: Dict[str, Any] = {
     "MOSSE": MOSSETracker,
+    "KCF": KCFTracker,
+    "MedianFlow": MedianFlowTracker,
 }
 
 
@@ -50,6 +56,8 @@ TRACKER_REGISTRY: Dict[str, Any] = {
 
 DATASET_REGISTRY: Dict[str, Any] = {
     "OTBDataset": OTBDataset,
+    "GOT10kDataset": GOT10kDataset,
+    "LaSOTDataset": LaSOTDataset,
 }
 
 
