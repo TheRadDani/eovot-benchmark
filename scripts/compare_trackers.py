@@ -40,9 +40,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from eovot.benchmark.engine import BenchmarkConfig, BenchmarkEngine
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
+from eovot.datasets.lasot import LaSOTDataset
 from eovot.reporting.reporter import BenchmarkReporter
 from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.mosse import MOSSETracker
+from eovot.trackers.medianflow import MedianFlowTracker
 
 # ---------------------------------------------------------------------------
 # Registries — add new trackers / datasets here without touching the CLI code
@@ -51,11 +53,13 @@ from eovot.trackers.mosse import MOSSETracker
 TRACKER_REGISTRY = {
     "MOSSE": MOSSETracker,
     "KCF": KCFTracker,
+    "MedianFlow": MedianFlowTracker,
 }
 
 DATASET_REGISTRY = {
     "OTBDataset": OTBDataset,
     "GOT10kDataset": GOT10kDataset,
+    "LaSOTDataset": LaSOTDataset,
 }
 
 
