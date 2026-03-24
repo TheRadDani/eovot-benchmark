@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
+
+try:
+    from tqdm import tqdm as _tqdm
+    _TQDM_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _TQDM_AVAILABLE = False
 
 from ..datasets.base import BaseDataset, Sequence
 from ..metrics.accuracy import MetricsEngine
@@ -53,6 +59,27 @@ class BenchmarkResult:
             "peak_memory_mb": round(self.peak_memory_mb, 2),
         }
 
+    def to_report_dict(self) -> Dict[str, Any]:
+        """Serialise to the dict format expected by :class:`~eovot.reporting.reporter.BenchmarkReporter`.
+
+        Returns a nested dict with:
+        - ``"summary"``: aggregate metrics (passed to ``print_summary``, ``save_json``).
+        - ``"sequences"``: per-sequence rows (passed to ``save_csv``).
+        """
+        return {
+            "summary": self.summary(),
+            "sequences": [
+                {
+                    "sequence_name": r.sequence_name,
+                    "mean_iou": round(r.mean_iou, 4),
+                    "fps": round(r.profiling.fps, 2),
+                    "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
+                    "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
+                }
+                for r in self.sequence_results
+            ],
+        }
+
     def __str__(self) -> str:
         s = self.summary()
         return (
@@ -85,11 +112,15 @@ class BenchmarkEngine:
             print(f"\nEvaluating {tracker.name} on {dataset_name} ({n} sequences)")
             print("-" * 60)
 
-        for idx in range(n):
+        indices = range(n)
+        if self.verbose and _TQDM_AVAILABLE:
+            indices = _tqdm(indices, desc=f"{tracker.name} on {dataset_name}", unit="seq")
+
+        for idx in indices:
             seq = dataset[idx]
             seq_result = self._run_sequence(tracker, seq)
             result.sequence_results.append(seq_result)
-            if self.verbose:
+            if self.verbose and not _TQDM_AVAILABLE:
                 print(
                     f"  [{idx + 1:>3}/{n}] {seq_result.sequence_name:<30s} "
                     f"mIoU={seq_result.mean_iou:.3f}  "
