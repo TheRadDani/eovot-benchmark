@@ -30,7 +30,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
-import cv2
+import numpy as np
 
 from .base import BaseDataset, BBox, Sequence
 
@@ -58,7 +58,9 @@ class GOT10kDataset(BaseDataset):
     ) -> None:
         if split not in self.SPLITS:
             raise ValueError(f"split must be one of {self.SPLITS!r}, got {split!r}")
-        super().__init__(root=root, split=split)
+        super().__init__()
+        self.root = root
+        self.split = split
         self.max_sequences = max_sequences
         self._split_dir = Path(root) / split
         self._seq_names: Optional[List[str]] = None
@@ -66,6 +68,12 @@ class GOT10kDataset(BaseDataset):
     # ------------------------------------------------------------------
     # BaseDataset interface
     # ------------------------------------------------------------------
+
+    def __len__(self) -> int:
+        return len(self.list_sequences())
+
+    def __getitem__(self, idx: int) -> Sequence:
+        return self.load_sequence(self.list_sequences()[idx])
 
     def list_sequences(self) -> List[str]:
         """Return the list of sequence names for this split.
@@ -99,12 +107,11 @@ class GOT10kDataset(BaseDataset):
             seq_name: Sequence folder name (e.g. ``"GOT-10k_Val_000001"``).
 
         Returns:
-            :class:`~eovot.datasets.base.Sequence` with frames and GT boxes
-            aligned to the same length.
+            :class:`~eovot.datasets.base.Sequence` with frame paths and GT
+            boxes aligned to the same length.
 
         Raises:
             FileNotFoundError: If ``groundtruth.txt`` or ``img/`` are missing.
-            IOError: If any frame image cannot be decoded by OpenCV.
         """
         seq_dir = self._split_dir / seq_name
 
@@ -131,12 +138,12 @@ class GOT10kDataset(BaseDataset):
         frame_paths = frame_paths[:n]
         gt_boxes = gt_boxes[:n]
 
-        frames = [cv2.imread(str(p)) for p in frame_paths]
-        bad = [str(frame_paths[i]) for i, f in enumerate(frames) if f is None]
-        if bad:
-            raise IOError(f"OpenCV failed to decode {len(bad)} frame(s): {bad[:3]} ...")
-
-        return Sequence(name=seq_name, frames=frames, gt_boxes=gt_boxes)
+        gt_arr = np.array(gt_boxes, dtype=np.float64)
+        return Sequence(
+            name=seq_name,
+            frame_paths=[str(p) for p in frame_paths],
+            ground_truth=gt_arr,
+        )
 
     @property
     def name(self) -> str:

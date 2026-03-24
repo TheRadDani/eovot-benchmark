@@ -37,7 +37,7 @@ from pathlib import Path
 # Allow running as ``python scripts/compare_trackers.py`` from the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from eovot.benchmark.engine import BenchmarkConfig, BenchmarkEngine
+from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
 from eovot.reporting.reporter import BenchmarkReporter
@@ -109,10 +109,9 @@ def main() -> None:
 
     dataset_name = args.dataset_name or args.dataset_loader
     reporter = BenchmarkReporter(output_dir=args.output_dir)
-    config = BenchmarkConfig(max_sequences=args.max_sequences, verbose=True)
-    engine = BenchmarkEngine(config=config)
+    engine = BenchmarkEngine(verbose=True)
 
-    all_results = []
+    all_reports = []
 
     for tracker_name in args.trackers:
         print(f"\n{'=' * 60}")
@@ -131,25 +130,30 @@ def main() -> None:
         else:
             dataset = dataset_cls(root=args.dataset_root)
 
-        result = engine.run(tracker, dataset)
-        result["summary"].setdefault("dataset_name", dataset_name)
+        result = engine.run(
+            tracker,
+            dataset,
+            dataset_name=dataset_name,
+            max_sequences=args.max_sequences,
+        )
+        report = result.to_report_dict()
 
-        reporter.print_summary(result)
+        reporter.print_summary(report)
 
         run_name = f"{tracker_name}-{dataset_name}"
-        saved = reporter.save_all(result, name=run_name)
+        saved = reporter.save_all(report, name=run_name)
         for fmt, path in saved.items():
             print(f"  [{fmt.upper()}] saved → {path}")
 
-        all_results.append(result)
+        all_reports.append(report)
 
     # -----------------------------------------------------------------------
     # Comparison table (only meaningful with 2+ trackers)
     # -----------------------------------------------------------------------
-    if len(all_results) > 1:
-        cmp_path = reporter.save_comparison(all_results, name=f"comparison-{dataset_name}")
+    if len(all_reports) > 1:
+        cmp_path = reporter.save_comparison(all_reports, name=f"comparison-{dataset_name}")
         print(f"\n[COMPARISON TABLE] saved → {cmp_path}")
-        print("\n" + reporter.comparison_table(all_results))
+        print("\n" + reporter.comparison_table(all_reports))
 
 
 if __name__ == "__main__":
