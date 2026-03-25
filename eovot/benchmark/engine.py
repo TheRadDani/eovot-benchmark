@@ -18,6 +18,14 @@ class SequenceResult:
     sequence_name: str
     ious: np.ndarray
     profiling: ProfilingResult
+    preds: np.ndarray = field(
+        default_factory=lambda: np.empty((0, 4), dtype=np.float64)
+    )
+    """Per-frame predicted bounding boxes, shape ``(N, 4)`` in ``(x,y,w,h)``."""
+    gts: np.ndarray = field(
+        default_factory=lambda: np.empty((0, 4), dtype=np.float64)
+    )
+    """Per-frame ground-truth bounding boxes, shape ``(N, 4)`` in ``(x,y,w,h)``."""
 
     @property
     def mean_iou(self) -> float:
@@ -126,4 +134,6 @@ class BenchmarkEngine:
             sequence_name=seq.name,
             ious=ious,
             profiling=self._profiler.summary(tracker.name),
+            preds=preds_arr[:n_eval],
+            gts=gt[:n_eval].astype(np.float64),
         )

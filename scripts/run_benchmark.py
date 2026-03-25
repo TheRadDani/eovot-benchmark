@@ -33,6 +33,7 @@ import yaml
 from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
 from eovot.trackers.mosse import MOSSETracker
+from eovot.visualization.curves import CurvePlotter
 
 
 # ------------------------------------------------------------------ #
@@ -86,6 +87,7 @@ def _config_from_args(args: argparse.Namespace) -> Dict:
         "reporting": {
             "formats": ["json"],
             "print_summary": True,
+            "plot_curves": args.plot,
         },
     }
 
@@ -160,6 +162,13 @@ def run_from_config(cfg: Dict) -> None:
             writer.writerow(summary)
         print(f"Results saved to {out_path}")
 
+    if cfg.get("reporting", {}).get("plot_curves", False):
+        plots_dir = os.path.join(output_dir, "plots")
+        plotter = CurvePlotter(output_dir=plots_dir)
+        paths = plotter.plot_all([result], title=exp_name)
+        for p in paths:
+            print(f"Plot saved to {p}")
+
 
 # ------------------------------------------------------------------ #
 # CLI argument parsing                                                 #
@@ -190,6 +199,8 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Directory for output reports (default: results/).")
     parser.add_argument("--quiet", action="store_true",
                         help="Suppress per-sequence progress output.")
+    parser.add_argument("--plot", action="store_true",
+                        help="Save success and precision curve plots to <output-dir>/plots/.")
     return parser
 
 
