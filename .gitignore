@@ -39,3 +39,6 @@
 
 # debug information files
 *.dwo
+eovot/visualization/__pycache__/
+__pycache__/
+**/__pycache__/

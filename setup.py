@@ -22,6 +22,7 @@ setup(
         "tqdm>=4.62",
     ],
     extras_require={
+        "viz": ["matplotlib>=3.5"],
         "torch": ["torch>=1.13"],
         "onnx": ["onnxruntime>=1.14"],
     },
