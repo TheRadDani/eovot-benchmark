@@ -30,7 +30,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
-import cv2
+import numpy as np
 
 from .base import BaseDataset, BBox, Sequence
 
@@ -58,14 +58,25 @@ class GOT10kDataset(BaseDataset):
     ) -> None:
         if split not in self.SPLITS:
             raise ValueError(f"split must be one of {self.SPLITS!r}, got {split!r}")
-        super().__init__(root=root, split=split)
+        # BaseDataset is an ABC with no __init__ parameters.
+        self.root = root
+        self.split = split
         self.max_sequences = max_sequences
         self._split_dir = Path(root) / split
         self._seq_names: Optional[List[str]] = None
 
     # ------------------------------------------------------------------
-    # BaseDataset interface
+    # BaseDataset abstract method implementations
     # ------------------------------------------------------------------
+
+    def __len__(self) -> int:
+        return len(self.list_sequences())
+
+    def __getitem__(self, idx: int) -> Sequence:
+        seq_names = self.list_sequences()
+        if idx < 0 or idx >= len(seq_names):
+            raise IndexError(f"Sequence index {idx} out of range for dataset of size {len(seq_names)}")
+        return self.load_sequence(seq_names[idx])
 
     def list_sequences(self) -> List[str]:
         """Return the list of sequence names for this split.
@@ -131,12 +142,11 @@ class GOT10kDataset(BaseDataset):
         frame_paths = frame_paths[:n]
         gt_boxes = gt_boxes[:n]
 
-        frames = [cv2.imread(str(p)) for p in frame_paths]
-        bad = [str(frame_paths[i]) for i, f in enumerate(frames) if f is None]
-        if bad:
-            raise IOError(f"OpenCV failed to decode {len(bad)} frame(s): {bad[:3]} ...")
-
-        return Sequence(name=seq_name, frames=frames, gt_boxes=gt_boxes)
+        return Sequence(
+            name=seq_name,
+            frame_paths=[str(p) for p in frame_paths],
+            ground_truth=np.array(gt_boxes, dtype=np.float64),
+        )
 
     @property
     def name(self) -> str:

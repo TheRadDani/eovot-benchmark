@@ -53,6 +53,29 @@ class BenchmarkResult:
             "peak_memory_mb": round(self.peak_memory_mb, 2),
         }
 
+    def to_dict(self) -> Dict:
+        """Serialise to the nested dict structure expected by :class:`~eovot.reporting.reporter.BenchmarkReporter`.
+
+        Returns:
+            Dict with keys ``"summary"`` (aggregate metrics) and
+            ``"sequences"`` (per-sequence breakdown).
+        """
+        return {
+            "summary": self.summary(),
+            "sequences": [
+                {
+                    "sequence_name": r.sequence_name,
+                    "mean_iou": round(r.mean_iou, 4),
+                    "precision_score": 0.0,
+                    "fps": round(r.profiling.fps, 2),
+                    "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
+                    "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
+                    "ious": r.ious.tolist(),
+                }
+                for r in self.sequence_results
+            ],
+        }
+
     def __str__(self) -> str:
         s = self.summary()
         return (
