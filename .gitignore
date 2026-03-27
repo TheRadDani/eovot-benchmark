@@ -39,3 +39,13 @@
 
 # debug information files
 *.dwo
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
