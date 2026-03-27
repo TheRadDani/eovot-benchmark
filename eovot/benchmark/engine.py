@@ -32,8 +32,32 @@ class BenchmarkResult:
 
     @property
     def mean_iou(self) -> float:
+        if not self.sequence_results:
+            return 0.0
         all_ious = np.concatenate([r.ious for r in self.sequence_results])
         return float(all_ious.mean()) if len(all_ious) else 0.0
+
+    def to_dict(self) -> Dict:
+        """Serialise to a plain dict compatible with :class:`~eovot.reporting.reporter.BenchmarkReporter`.
+
+        Returns a dict with ``"summary"`` and ``"sequences"`` keys, suitable
+        for :meth:`~eovot.reporting.reporter.BenchmarkReporter.save_all`,
+        :meth:`~eovot.reporting.reporter.BenchmarkReporter.print_summary`, and
+        :meth:`~eovot.reporting.reporter.BenchmarkReporter.comparison_table`.
+        """
+        return {
+            "summary": self.summary(),
+            "sequences": [
+                {
+                    "sequence_name": sr.sequence_name,
+                    "mean_iou": sr.mean_iou,
+                    "fps": sr.profiling.fps,
+                    "mean_latency_ms": sr.profiling.latency_mean_ms,
+                    "peak_memory_mb": sr.profiling.peak_memory_mb,
+                }
+                for sr in self.sequence_results
+            ],
+        }
 
     @property
     def mean_fps(self) -> float:
