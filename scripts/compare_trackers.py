@@ -43,6 +43,7 @@ from eovot.datasets.got10k import GOT10kDataset
 from eovot.reporting.reporter import BenchmarkReporter
 from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.mosse import MOSSETracker
+from eovot.trackers.siamfc import SiamFCTracker
 
 # ---------------------------------------------------------------------------
 # Registries — add new trackers / datasets here without touching the CLI code
@@ -51,6 +52,7 @@ from eovot.trackers.mosse import MOSSETracker
 TRACKER_REGISTRY = {
     "MOSSE": MOSSETracker,
     "KCF": KCFTracker,
+    "SiamFC": SiamFCTracker,
 }
 
 DATASET_REGISTRY = {

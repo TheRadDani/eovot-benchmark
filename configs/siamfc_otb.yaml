@@ -1,0 +1,41 @@
+# EOVOT SiamFC experiment configuration
+# ----------------------------------------
+# Evaluates the SiamFC deep tracker on OTB100.
+# Run with:
+#   python scripts/run_benchmark.py --config configs/siamfc_otb.yaml
+#
+# PyTorch is required:  pip install torch torchvision
+#
+# To load pretrained backbone weights, set tracker.params.weights_path.
+# Without a checkpoint the tracker uses randomly initialised weights —
+# accuracy will be low, but the pipeline wiring is fully functional.
+
+experiment:
+  name: "siamfc-otb100"
+  output_dir: "results/"
+
+dataset:
+  name: "OTB100"
+  loader: "OTBDataset"
+  root: "/data/OTB100"    # ← update to your local OTB100 path
+  max_sequences: null      # null = evaluate all 100 sequences
+
+tracker:
+  name: "SiamFC"
+  params:
+    template_size: 127        # square template crop size (px)
+    search_size: 255          # square search-region crop size (px)
+    context_amount: 0.5       # context margin = 0.5 × (w + h)
+    scale_step: 1.05          # scale-pyramid step
+    scale_lr: 0.59            # EMA weight for scale update
+    scale_penalty: 0.9745     # penalty for off-scale candidates
+    response_up: 16           # response-map upsampling factor
+    device: "cpu"             # "cuda:0" for GPU inference
+    weights_path: null        # null = random init; set to a .pth path
+
+benchmark:
+  verbose: true
+
+reporting:
+  formats: ["json", "csv"]
+  print_summary: true

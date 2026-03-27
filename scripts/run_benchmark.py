@@ -32,7 +32,9 @@ import yaml
 
 from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
+from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.mosse import MOSSETracker
+from eovot.trackers.siamfc import SiamFCTracker
 
 
 # ------------------------------------------------------------------ #
@@ -41,6 +43,8 @@ from eovot.trackers.mosse import MOSSETracker
 
 TRACKER_REGISTRY: Dict[str, Any] = {
     "MOSSE": MOSSETracker,
+    "KCF": KCFTracker,
+    "SiamFC": SiamFCTracker,
 }
 
 
