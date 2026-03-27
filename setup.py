@@ -22,6 +22,7 @@ setup(
         "tqdm>=4.62",
     ],
     extras_require={
+        "deep": ["torch>=1.13", "torchvision>=0.14"],  # enables SiamFCTracker
         "torch": ["torch>=1.13"],
         "onnx": ["onnxruntime>=1.14"],
     },
