@@ -7,3 +7,7 @@ tqdm>=4.62
 # Optional deep-learning / optimisation backends
 # torch>=1.13
 # onnxruntime>=1.14
+
+# Testing
+# pytest>=7.0
+# pytest-cov>=4.0

@@ -179,10 +179,14 @@ class MetricsEngine:
         ious = self.batch_iou(preds, gts)
 
         thr_iou, sr = self.success_curve(ious)
-        success_auc = float(np.trapz(sr, thr_iou))
+        try:
+            _trapz = np.trapezoid  # numpy ≥ 2.0
+        except AttributeError:
+            _trapz = np.trapz  # numpy < 2.0
+        success_auc = float(_trapz(sr, thr_iou))
 
         thr_dist, pr = self.precision_curve(preds, gts)
-        prec_auc = float(np.trapz(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
+        prec_auc = float(_trapz(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
 
         return AccuracyMetrics(
             mean_iou=float(ious.mean()),
