@@ -1,0 +1,159 @@
+"""Integration tests for BenchmarkEngine using a synthetic dataset.
+
+No real dataset files are needed — sequences are generated entirely in memory
+using a dummy tracker and a mock dataset.
+"""
+
+from __future__ import annotations
+
+from typing import Iterator, List, Tuple
+
+import numpy as np
+import pytest
+
+from eovot.benchmark.engine import BenchmarkEngine, BenchmarkResult, SequenceResult
+from eovot.datasets.base import BaseDataset, Sequence
+from eovot.trackers.base import BaseTracker
+
+BBox = Tuple[float, float, float, float]
+
+# ---------------------------------------------------------------------------
+# Helpers — synthetic tracker and dataset
+# ---------------------------------------------------------------------------
+
+NUM_FRAMES = 20
+FIXED_BOX: BBox = (10.0, 10.0, 50.0, 50.0)
+
+
+class ConstantTracker(BaseTracker):
+    """Tracker that always returns a fixed bounding box regardless of input."""
+
+    def __init__(self, box: BBox = FIXED_BOX) -> None:
+        self._box = box
+
+    @property
+    def name(self) -> str:
+        return "ConstantTracker"
+
+    def initialize(self, frame: np.ndarray, bbox: BBox) -> None:
+        pass  # nothing to initialise
+
+    def update(self, frame: np.ndarray) -> BBox:
+        return self._box
+
+
+class SyntheticSequence(Sequence):
+    """An in-memory sequence that yields black frames of a fixed size."""
+
+    def __init__(self, name: str, n_frames: int, gt_box: BBox) -> None:
+        gt = np.tile(np.array(gt_box), (n_frames, 1))
+        # Provide dummy frame_paths; we override __iter__ to avoid file I/O.
+        super().__init__(
+            name=name,
+            frame_paths=[f"frame_{i:04d}.jpg" for i in range(n_frames)],
+            ground_truth=gt,
+        )
+        self._n_frames = n_frames
+
+    def __iter__(self) -> Iterator[np.ndarray]:  # type: ignore[override]
+        """Yield black BGR frames (no disk I/O)."""
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        for _ in range(self._n_frames):
+            yield frame
+
+
+class SyntheticDataset(BaseDataset):
+    """Small synthetic dataset of identical sequences."""
+
+    def __init__(self, n_sequences: int = 3) -> None:
+        self._seqs = [
+            SyntheticSequence(f"seq_{i:02d}", NUM_FRAMES, FIXED_BOX)
+            for i in range(n_sequences)
+        ]
+
+    def __len__(self) -> int:
+        return len(self._seqs)
+
+    def __getitem__(self, idx: int) -> Sequence:
+        return self._seqs[idx]
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+class TestBenchmarkEngine:
+    def setup_method(self):
+        self.engine = BenchmarkEngine(verbose=False)
+        self.tracker = ConstantTracker(FIXED_BOX)
+        self.dataset = SyntheticDataset(n_sequences=3)
+
+    def test_run_returns_benchmark_result(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        assert isinstance(result, BenchmarkResult)
+
+    def test_correct_number_of_sequences(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        assert len(result.sequence_results) == 3
+
+    def test_max_sequences_cap(self):
+        result = self.engine.run(
+            self.tracker, self.dataset,
+            dataset_name="Synthetic",
+            max_sequences=2,
+        )
+        assert len(result.sequence_results) == 2
+
+    def test_perfect_tracker_iou(self):
+        """A tracker that predicts the exact GT box should achieve mIoU=1.0."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        assert result.mean_iou == pytest.approx(1.0)
+
+    def test_mean_fps_is_positive(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        assert result.mean_fps > 0.0
+
+    def test_peak_memory_is_positive(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        assert result.peak_memory_mb > 0.0
+
+    def test_sequence_result_structure(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        for sr in result.sequence_results:
+            assert isinstance(sr, SequenceResult)
+            # Engine appends init prediction for frame 0 (GT box) + predictions for
+            # frames 1..N-1, giving N total predictions aligned against N GT boxes.
+            assert len(sr.ious) == NUM_FRAMES
+            assert sr.mean_iou == pytest.approx(1.0)
+
+    def test_tracker_name_propagated(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        assert result.tracker_name == "ConstantTracker"
+
+    def test_dataset_name_propagated(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="MyDataset")
+        assert result.dataset_name == "MyDataset"
+
+    def test_summary_dict_keys(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        s = result.summary()
+        for key in ("tracker", "dataset", "num_sequences", "mean_iou", "mean_fps", "peak_memory_mb"):
+            assert key in s
+
+    def test_to_dict_structure(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        d = result.to_dict()
+        assert "summary" in d
+        assert "sequences" in d
+        assert len(d["sequences"]) == len(result.sequence_results)
+        for seq_entry in d["sequences"]:
+            for key in ("sequence_name", "mean_iou", "fps", "mean_latency_ms", "peak_memory_mb"):
+                assert key in seq_entry
+
+    def test_imperfect_tracker_iou(self):
+        """A tracker predicting a shifted box should have mIoU < 1."""
+        shifted_box = (30.0, 30.0, 50.0, 50.0)  # offset from GT (10,10,50,50)
+        tracker = ConstantTracker(shifted_box)
+        result = self.engine.run(tracker, self.dataset, dataset_name="Synthetic")
+        assert result.mean_iou < 1.0
+        assert result.mean_iou > 0.0  # still some overlap
