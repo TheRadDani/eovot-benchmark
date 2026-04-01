@@ -30,7 +30,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
-import cv2
+import numpy as np
 
 from .base import BaseDataset, BBox, Sequence
 
@@ -44,8 +44,14 @@ class GOT10kDataset(BaseDataset):
         split: Dataset split — one of ``"train"``, ``"val"``, ``"test"``.
             Default: ``"val"``.
         max_sequences: Optional upper limit on the number of sequences
-            returned by :meth:`list_sequences`.  Useful for quick smoke
-            tests without downloading the full dataset.
+            returned.  Useful for quick smoke tests without downloading
+            the full dataset.
+
+    Example::
+
+        dataset = GOT10kDataset("/data/GOT-10k", split="val", max_sequences=10)
+        for seq in dataset:
+            print(seq.name, len(seq))
     """
 
     SPLITS = ("train", "val", "test")
@@ -58,21 +64,32 @@ class GOT10kDataset(BaseDataset):
     ) -> None:
         if split not in self.SPLITS:
             raise ValueError(f"split must be one of {self.SPLITS!r}, got {split!r}")
-        super().__init__(root=root, split=split)
+        self.split = split
         self.max_sequences = max_sequences
         self._split_dir = Path(root) / split
+        if not self._split_dir.is_dir():
+            raise FileNotFoundError(
+                f"GOT-10k split directory not found: {self._split_dir}"
+            )
         self._seq_names: Optional[List[str]] = None
 
     # ------------------------------------------------------------------
     # BaseDataset interface
     # ------------------------------------------------------------------
 
-    def list_sequences(self) -> List[str]:
-        """Return the list of sequence names for this split.
+    def __len__(self) -> int:
+        return len(self._get_seq_names())
 
-        Reads ``list.txt`` when present; falls back to enumerating
-        subdirectories that contain an ``img/`` folder.
-        """
+    def __getitem__(self, idx: int) -> Sequence:
+        seq_name = self._get_seq_names()[idx]
+        return self._load_sequence(seq_name)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _get_seq_names(self) -> List[str]:
+        """Return (and cache) the ordered list of sequence names for this split."""
         if self._seq_names is not None:
             return self._seq_names
 
@@ -81,6 +98,7 @@ class GOT10kDataset(BaseDataset):
             with open(list_file) as fh:
                 names = [ln.strip() for ln in fh if ln.strip()]
         else:
+            # Fall back to enumerating subdirectories that look like sequences.
             names = sorted(
                 d.name
                 for d in self._split_dir.iterdir()
@@ -92,19 +110,18 @@ class GOT10kDataset(BaseDataset):
         self._seq_names = names
         return self._seq_names
 
-    def load_sequence(self, seq_name: str) -> Sequence:
+    def _load_sequence(self, seq_name: str) -> Sequence:
         """Load a single GOT-10k sequence by name.
 
         Args:
             seq_name: Sequence folder name (e.g. ``"GOT-10k_Val_000001"``).
 
         Returns:
-            :class:`~eovot.datasets.base.Sequence` with frames and GT boxes
-            aligned to the same length.
+            :class:`~eovot.datasets.base.Sequence` with frame paths and GT
+            boxes aligned to the same length.
 
         Raises:
             FileNotFoundError: If ``groundtruth.txt`` or ``img/`` are missing.
-            IOError: If any frame image cannot be decoded by OpenCV.
         """
         seq_dir = self._split_dir / seq_name
 
@@ -122,29 +139,16 @@ class GOT10kDataset(BaseDataset):
             raise FileNotFoundError(f"img/ directory not found at {img_dir}")
 
         frame_paths = sorted(img_dir.glob("*.jpg")) + sorted(img_dir.glob("*.png"))
-        frame_paths = sorted(frame_paths)  # ensure chronological order after merge
+        frame_paths = sorted(frame_paths)  # chronological order after merge
         if not frame_paths:
             raise FileNotFoundError(f"No JPEG/PNG frames found in {img_dir}")
 
         # Align frame count and GT length (some sequences may differ by one).
         n = min(len(frame_paths), len(gt_boxes))
-        frame_paths = frame_paths[:n]
-        gt_boxes = gt_boxes[:n]
+        frame_paths = [str(p) for p in frame_paths[:n]]
+        gt_array = np.array(gt_boxes[:n], dtype=np.float64)
 
-        frames = [cv2.imread(str(p)) for p in frame_paths]
-        bad = [str(frame_paths[i]) for i, f in enumerate(frames) if f is None]
-        if bad:
-            raise IOError(f"OpenCV failed to decode {len(bad)} frame(s): {bad[:3]} ...")
-
-        return Sequence(name=seq_name, frames=frames, gt_boxes=gt_boxes)
-
-    @property
-    def name(self) -> str:
-        return f"GOT-10k-{self.split}"
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
+        return Sequence(name=seq_name, frame_paths=frame_paths, ground_truth=gt_array)
 
     @staticmethod
     def _load_groundtruth(gt_file: Path) -> List[BBox]:
@@ -159,9 +163,18 @@ class GOT10kDataset(BaseDataset):
                 line = line.strip()
                 if not line:
                     continue
-                parts = [p for p in line.replace("\t", ",").replace(" ", ",").split(",") if p]
+                parts = [
+                    p
+                    for p in line.replace("\t", ",").replace(" ", ",").split(",")
+                    if p
+                ]
                 if len(parts) < 4:
                     continue
-                x, y, w, h = float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3])
+                x, y, w, h = (
+                    float(parts[0]),
+                    float(parts[1]),
+                    float(parts[2]),
+                    float(parts[3]),
+                )
                 boxes.append((x, y, w, h))
         return boxes

@@ -33,11 +33,12 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any, Dict, List
 
 # Allow running as ``python scripts/compare_trackers.py`` from the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from eovot.benchmark.engine import BenchmarkConfig, BenchmarkEngine
+from eovot.benchmark.engine import BenchmarkEngine, BenchmarkResult
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
 from eovot.reporting.reporter import BenchmarkReporter
@@ -57,6 +58,22 @@ DATASET_REGISTRY = {
     "OTBDataset": OTBDataset,
     "GOT10kDataset": GOT10kDataset,
 }
+
+
+def _result_to_dict(result: BenchmarkResult) -> Dict[str, Any]:
+    """Convert a :class:`BenchmarkResult` to the dict format expected by
+    :class:`~eovot.reporting.reporter.BenchmarkReporter`."""
+    sequences = [
+        {
+            "sequence_name": sr.sequence_name,
+            "mean_iou": sr.mean_iou,
+            "precision_score": 0.0,  # not computed at per-sequence level
+            "fps": sr.profiling.fps,
+            "mean_latency_ms": sr.profiling.latency_mean_ms,
+        }
+        for sr in result.sequence_results
+    ]
+    return {"summary": result.summary(), "sequences": sequences}
 
 
 def main() -> None:
@@ -109,10 +126,9 @@ def main() -> None:
 
     dataset_name = args.dataset_name or args.dataset_loader
     reporter = BenchmarkReporter(output_dir=args.output_dir)
-    config = BenchmarkConfig(max_sequences=args.max_sequences, verbose=True)
-    engine = BenchmarkEngine(config=config)
+    engine = BenchmarkEngine(verbose=True)
 
-    all_results = []
+    all_result_dicts: List[Dict[str, Any]] = []
 
     for tracker_name in args.trackers:
         print(f"\n{'=' * 60}")
@@ -131,25 +147,32 @@ def main() -> None:
         else:
             dataset = dataset_cls(root=args.dataset_root)
 
-        result = engine.run(tracker, dataset)
-        result["summary"].setdefault("dataset_name", dataset_name)
+        result = engine.run(
+            tracker=tracker,
+            dataset=dataset,
+            dataset_name=dataset_name,
+            max_sequences=args.max_sequences,
+        )
 
-        reporter.print_summary(result)
+        result_dict = _result_to_dict(result)
+        reporter.print_summary(result_dict)
 
         run_name = f"{tracker_name}-{dataset_name}"
-        saved = reporter.save_all(result, name=run_name)
+        saved = reporter.save_all(result_dict, name=run_name)
         for fmt, path in saved.items():
             print(f"  [{fmt.upper()}] saved → {path}")
 
-        all_results.append(result)
+        all_result_dicts.append(result_dict)
 
     # -----------------------------------------------------------------------
     # Comparison table (only meaningful with 2+ trackers)
     # -----------------------------------------------------------------------
-    if len(all_results) > 1:
-        cmp_path = reporter.save_comparison(all_results, name=f"comparison-{dataset_name}")
+    if len(all_result_dicts) > 1:
+        cmp_path = reporter.save_comparison(
+            all_result_dicts, name=f"comparison-{dataset_name}"
+        )
         print(f"\n[COMPARISON TABLE] saved → {cmp_path}")
-        print("\n" + reporter.comparison_table(all_results))
+        print("\n" + reporter.comparison_table(all_result_dicts))
 
 
 if __name__ == "__main__":

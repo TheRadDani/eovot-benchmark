@@ -141,8 +141,8 @@ class BenchmarkReporter:
             A ``| col | col | ... |`` formatted string (no trailing newline).
         """
         s = result.get("summary", {})
-        tracker = s.get("tracker_name", "?")
-        dataset = s.get("dataset_name", "?")
+        tracker = s.get("tracker", "?")
+        dataset = s.get("dataset", "?")
         mean_iou = s.get("mean_iou", 0.0)
         mean_prec = s.get("mean_precision", 0.0)
         fps = s.get("mean_fps", 0.0)
