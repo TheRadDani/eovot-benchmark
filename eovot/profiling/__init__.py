@@ -1,5 +1,6 @@
-"""Profiling sub-package — hardware-aware latency and memory measurement."""
+"""Profiling sub-package — hardware-aware latency, memory, and energy measurement."""
 
 from .profiler import Profiler, ProfilingResult
+from .energy import EnergyEstimator, EnergyResult
 
-__all__ = ["Profiler", "ProfilingResult"]
+__all__ = ["Profiler", "ProfilingResult", "EnergyEstimator", "EnergyResult"]

@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from eovot.benchmark.engine import BenchmarkConfig, BenchmarkEngine
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
+from eovot.datasets.lasot import LaSOTDataset
 from eovot.reporting.reporter import BenchmarkReporter
 from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.mosse import MOSSETracker
@@ -56,6 +57,7 @@ TRACKER_REGISTRY = {
 DATASET_REGISTRY = {
     "OTBDataset": OTBDataset,
     "GOT10kDataset": GOT10kDataset,
+    "LaSOTDataset": LaSOTDataset,
 }
 
 
@@ -126,6 +128,11 @@ def main() -> None:
             dataset = dataset_cls(
                 root=args.dataset_root,
                 split=args.split,
+                max_sequences=args.max_sequences,
+            )
+        elif args.dataset_loader == "LaSOTDataset":
+            dataset = dataset_cls(
+                root=args.dataset_root,
                 max_sequences=args.max_sequences,
             )
         else:

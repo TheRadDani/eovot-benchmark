@@ -32,6 +32,7 @@ import yaml
 
 from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
+from eovot.datasets.lasot import LaSOTDataset
 from eovot.trackers.mosse import MOSSETracker
 
 
@@ -50,6 +51,7 @@ TRACKER_REGISTRY: Dict[str, Any] = {
 
 DATASET_REGISTRY: Dict[str, Any] = {
     "OTBDataset": OTBDataset,
+    "LaSOTDataset": LaSOTDataset,
 }
 
 
@@ -102,7 +104,15 @@ def run_from_config(cfg: Dict) -> None:
     if loader_cls is None:
         print(f"[ERROR] Unknown dataset loader: {ds_cfg['loader']}", file=sys.stderr)
         sys.exit(1)
-    dataset = loader_cls(ds_cfg["root"])
+    loader_name = ds_cfg.get("loader", "OTBDataset")
+    if loader_name == "LaSOTDataset":
+        dataset = loader_cls(
+            ds_cfg["root"],
+            categories=ds_cfg.get("categories"),
+            max_sequences=ds_cfg.get("max_sequences"),
+        )
+    else:
+        dataset = loader_cls(ds_cfg["root"])
 
     # --- Tracker ---
     tr_cfg = cfg["tracker"]
