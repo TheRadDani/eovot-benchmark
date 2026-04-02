@@ -1,0 +1,37 @@
+# EOVOT experiment: KCF tracker on LaSOT test split
+# ---------------------------------------------------
+# Usage:
+#   python scripts/run_benchmark.py --config configs/lasot_kcf.yaml
+
+experiment:
+  name: "kcf-lasot-test"
+  output_dir: "results/lasot/"
+  seed: 42
+
+dataset:
+  name: "LaSOT-test"
+  loader: "LaSOTDataset"
+  root: "/data/LaSOT"
+  split: "test"
+  max_sequences: null                  # null = all 280 test sequences
+  # categories: ["car", "airplane"]    # Uncomment to restrict to specific classes
+
+tracker:
+  name: "KCF"
+  params:
+    learning_rate: 0.075
+    lambda_: 0.0001
+    padding: 2.5
+
+benchmark:
+  verbose: true
+
+reporting:
+  formats: ["json", "csv"]
+  print_summary: true
+
+energy:
+  enabled: true
+  backend: null                        # auto-detect
+  sample_interval_s: 0.1
+  cpu_tdp_w: 15.0

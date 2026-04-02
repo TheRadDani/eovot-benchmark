@@ -10,12 +10,15 @@ experiment:
 
 dataset:
   name: "OTB100"                      # Dataset label used in reports
-  loader: "OTBDataset"                # Loader class name
+  loader: "OTBDataset"                # Loader class name (OTBDataset | GOT10kDataset | LaSOTDataset)
   root: "/data/OTB100"               # Path to dataset root directory
   max_sequences: null                  # null = evaluate all sequences
+  # GOT-10k / LaSOT specific options:
+  # split: "val"                       # train | val | test (GOT-10k); train | test (LaSOT)
+  # categories: null                   # LaSOT: list of categories, e.g. ["car", "person"]
 
 tracker:
-  name: "MOSSE"                       # Tracker class name
+  name: "MOSSE"                       # Tracker class name (MOSSE | KCF)
   params:
     learning_rate: 0.125              # EMA weight for filter update
     sigma: 2.0                        # Gaussian response sigma (px)
@@ -27,3 +30,11 @@ benchmark:
 reporting:
   formats: ["json", "csv"]            # Output report formats
   print_summary: true                 # Print table to stdout at the end
+
+# Energy profiling configuration (optional, disabled by default).
+# When enabled, wraps each sequence run with an EnergyProfiler measurement.
+energy:
+  enabled: false                      # Set to true to enable energy measurement
+  backend: null                       # null = auto-detect; or: nvidia_gpu | rapl | cpu_estimate
+  sample_interval_s: 0.1             # Sampling interval for power readings
+  cpu_tdp_w: 15.0                    # Assumed CPU TDP (W) for cpu_estimate backend
