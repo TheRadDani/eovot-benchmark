@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -51,6 +51,41 @@ class BenchmarkResult:
             "mean_iou": round(self.mean_iou, 4),
             "mean_fps": round(self.mean_fps, 2),
             "peak_memory_mb": round(self.peak_memory_mb, 2),
+        }
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialise to the dict format expected by :class:`~eovot.reporting.reporter.BenchmarkReporter`.
+
+        Returns a nested dict with ``"summary"`` and ``"sequences"`` keys.
+        """
+        mean_latency_ms = (
+            float(np.mean([r.profiling.latency_mean_ms for r in self.sequence_results]))
+            if self.sequence_results else 0.0
+        )
+        return {
+            "summary": {
+                "tracker_name": self.tracker_name,
+                "dataset_name": self.dataset_name,
+                "num_sequences": len(self.sequence_results),
+                "mean_iou": round(self.mean_iou, 4),
+                "mean_fps": round(self.mean_fps, 2),
+                "mean_latency_ms": round(mean_latency_ms, 3),
+                "peak_memory_mb": round(self.peak_memory_mb, 2),
+                # Precision not computed at engine level (no raw GT/pred access here).
+                # Use MetricsEngine.compute_all() for per-sequence precision.
+                "mean_precision": 0.0,
+            },
+            "sequences": [
+                {
+                    "sequence_name": r.sequence_name,
+                    "mean_iou": round(r.mean_iou, 4),
+                    "fps": round(r.profiling.fps, 2),
+                    "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
+                    "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
+                    "precision_score": 0.0,
+                }
+                for r in self.sequence_results
+            ],
         }
 
     def __str__(self) -> str:
