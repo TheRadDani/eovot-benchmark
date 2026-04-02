@@ -32,7 +32,10 @@ import yaml
 
 from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
+from eovot.datasets.got10k import GOT10kDataset
+from eovot.datasets.lasot import LaSOTDataset
 from eovot.trackers.mosse import MOSSETracker
+from eovot.trackers.kcf import KCFTracker
 
 
 # ------------------------------------------------------------------ #
@@ -41,6 +44,7 @@ from eovot.trackers.mosse import MOSSETracker
 
 TRACKER_REGISTRY: Dict[str, Any] = {
     "MOSSE": MOSSETracker,
+    "KCF": KCFTracker,
 }
 
 
@@ -50,6 +54,8 @@ TRACKER_REGISTRY: Dict[str, Any] = {
 
 DATASET_REGISTRY: Dict[str, Any] = {
     "OTBDataset": OTBDataset,
+    "GOT10kDataset": GOT10kDataset,
+    "LaSOTDataset": LaSOTDataset,
 }
 
 
@@ -134,7 +140,7 @@ def run_from_config(cfg: Dict) -> None:
     exp_name = cfg["experiment"].get("name", "run")
     os.makedirs(output_dir, exist_ok=True)
 
-    summary = result.summary()
+    summary = result["summary"]
 
     if report_cfg.get("print_summary", True):
         print("\n" + "=" * 60)
@@ -148,7 +154,7 @@ def run_from_config(cfg: Dict) -> None:
     if "json" in formats:
         out_path = os.path.join(output_dir, f"{exp_name}.json")
         with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2)
+            json.dump(result, f, indent=2)
         print(f"\nResults saved to {out_path}")
 
     if "csv" in formats:

@@ -30,7 +30,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
-import cv2
+import numpy as np
 
 from .base import BaseDataset, BBox, Sequence
 
@@ -44,8 +44,14 @@ class GOT10kDataset(BaseDataset):
         split: Dataset split — one of ``"train"``, ``"val"``, ``"test"``.
             Default: ``"val"``.
         max_sequences: Optional upper limit on the number of sequences
-            returned by :meth:`list_sequences`.  Useful for quick smoke
-            tests without downloading the full dataset.
+            returned.  Useful for quick smoke tests without downloading
+            the full dataset.
+
+    Example::
+
+        dataset = GOT10kDataset("/data/GOT-10k", split="val", max_sequences=10)
+        for seq in dataset:
+            print(seq.name, len(seq))
     """
 
     SPLITS = ("train", "val", "test")
@@ -58,7 +64,8 @@ class GOT10kDataset(BaseDataset):
     ) -> None:
         if split not in self.SPLITS:
             raise ValueError(f"split must be one of {self.SPLITS!r}, got {split!r}")
-        super().__init__(root=root, split=split)
+        self.root = root
+        self.split = split
         self.max_sequences = max_sequences
         self._split_dir = Path(root) / split
         self._seq_names: Optional[List[str]] = None
@@ -66,6 +73,15 @@ class GOT10kDataset(BaseDataset):
     # ------------------------------------------------------------------
     # BaseDataset interface
     # ------------------------------------------------------------------
+
+    def __len__(self) -> int:
+        return len(self.list_sequences())
+
+    def __getitem__(self, idx: int) -> Sequence:
+        names = self.list_sequences()
+        if idx < 0 or idx >= len(names):
+            raise IndexError(f"Sequence index {idx} out of range (0–{len(names) - 1})")
+        return self.load_sequence(names[idx])
 
     def list_sequences(self) -> List[str]:
         """Return the list of sequence names for this split.
@@ -99,12 +115,11 @@ class GOT10kDataset(BaseDataset):
             seq_name: Sequence folder name (e.g. ``"GOT-10k_Val_000001"``).
 
         Returns:
-            :class:`~eovot.datasets.base.Sequence` with frames and GT boxes
-            aligned to the same length.
+            :class:`~eovot.datasets.base.Sequence` with frame paths and GT
+            boxes aligned to the same length.
 
         Raises:
             FileNotFoundError: If ``groundtruth.txt`` or ``img/`` are missing.
-            IOError: If any frame image cannot be decoded by OpenCV.
         """
         seq_dir = self._split_dir / seq_name
 
@@ -122,21 +137,16 @@ class GOT10kDataset(BaseDataset):
             raise FileNotFoundError(f"img/ directory not found at {img_dir}")
 
         frame_paths = sorted(img_dir.glob("*.jpg")) + sorted(img_dir.glob("*.png"))
-        frame_paths = sorted(frame_paths)  # ensure chronological order after merge
+        frame_paths = sorted(frame_paths)
         if not frame_paths:
             raise FileNotFoundError(f"No JPEG/PNG frames found in {img_dir}")
 
         # Align frame count and GT length (some sequences may differ by one).
         n = min(len(frame_paths), len(gt_boxes))
-        frame_paths = frame_paths[:n]
-        gt_boxes = gt_boxes[:n]
+        frame_path_strs = [str(p) for p in frame_paths[:n]]
+        gt_array = np.array(gt_boxes[:n], dtype=np.float64)
 
-        frames = [cv2.imread(str(p)) for p in frame_paths]
-        bad = [str(frame_paths[i]) for i, f in enumerate(frames) if f is None]
-        if bad:
-            raise IOError(f"OpenCV failed to decode {len(bad)} frame(s): {bad[:3]} ...")
-
-        return Sequence(name=seq_name, frames=frames, gt_boxes=gt_boxes)
+        return Sequence(name=seq_name, frame_paths=frame_path_strs, ground_truth=gt_array)
 
     @property
     def name(self) -> str:
