@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from eovot.benchmark.engine import BenchmarkConfig, BenchmarkEngine
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
+from eovot.datasets.lasot import LaSOTDataset
 from eovot.reporting.reporter import BenchmarkReporter
 from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.mosse import MOSSETracker
@@ -56,6 +57,7 @@ TRACKER_REGISTRY = {
 DATASET_REGISTRY = {
     "OTBDataset": OTBDataset,
     "GOT10kDataset": GOT10kDataset,
+    "LaSOTDataset": LaSOTDataset,
 }
 
 
@@ -92,7 +94,7 @@ def main() -> None:
     parser.add_argument(
         "--split",
         default="val",
-        help="Dataset split (for GOT-10k: train | val | test).",
+        help="Dataset split (for GOT-10k / LaSOT: train | val | test).",
     )
     parser.add_argument(
         "--max-sequences",
@@ -122,7 +124,7 @@ def main() -> None:
         tracker = TRACKER_REGISTRY[tracker_name]()
 
         dataset_cls = DATASET_REGISTRY[args.dataset_loader]
-        if args.dataset_loader == "GOT10kDataset":
+        if args.dataset_loader in ("GOT10kDataset", "LaSOTDataset"):
             dataset = dataset_cls(
                 root=args.dataset_root,
                 split=args.split,
@@ -131,7 +133,7 @@ def main() -> None:
         else:
             dataset = dataset_cls(root=args.dataset_root)
 
-        result = engine.run(tracker, dataset)
+        result = engine.run(tracker, dataset, dataset_name=dataset_name)
         result["summary"].setdefault("dataset_name", dataset_name)
 
         reporter.print_summary(result)
