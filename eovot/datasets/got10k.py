@@ -30,7 +30,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
-import cv2
+import numpy as np
 
 from .base import BaseDataset, BBox, Sequence
 
@@ -38,14 +38,27 @@ from .base import BaseDataset, BBox, Sequence
 class GOT10kDataset(BaseDataset):
     """Dataset loader for GOT-10k (train / val / test splits).
 
+    Implements the :class:`~eovot.datasets.base.BaseDataset` interface via
+    ``__len__`` and ``__getitem__``, so it works directly with
+    :class:`~eovot.benchmark.engine.BenchmarkEngine`.
+
+    Frames are loaded lazily on iteration (not pre-loaded into RAM), keeping
+    memory usage constant regardless of dataset size.
+
     Args:
         root: Path to the GOT-10k root directory.  Must contain
             ``train/``, ``val/``, or ``test/`` subdirectories.
         split: Dataset split — one of ``"train"``, ``"val"``, ``"test"``.
             Default: ``"val"``.
         max_sequences: Optional upper limit on the number of sequences
-            returned by :meth:`list_sequences`.  Useful for quick smoke
-            tests without downloading the full dataset.
+            returned.  Useful for quick smoke tests without downloading the
+            full dataset.
+
+    Example::
+
+        dataset = GOT10kDataset("/data/GOT-10k", split="val", max_sequences=10)
+        for seq in dataset:
+            print(seq.name, len(seq))
     """
 
     SPLITS = ("train", "val", "test")
@@ -58,7 +71,9 @@ class GOT10kDataset(BaseDataset):
     ) -> None:
         if split not in self.SPLITS:
             raise ValueError(f"split must be one of {self.SPLITS!r}, got {split!r}")
-        super().__init__(root=root, split=split)
+        # BaseDataset has no constructor parameters — do NOT forward kwargs.
+        self.root = root
+        self.split = split
         self.max_sequences = max_sequences
         self._split_dir = Path(root) / split
         self._seq_names: Optional[List[str]] = None
@@ -67,8 +82,23 @@ class GOT10kDataset(BaseDataset):
     # BaseDataset interface
     # ------------------------------------------------------------------
 
-    def list_sequences(self) -> List[str]:
-        """Return the list of sequence names for this split.
+    def __len__(self) -> int:
+        return len(self._get_seq_names())
+
+    def __getitem__(self, idx: int) -> Sequence:
+        seq_name = self._get_seq_names()[idx]
+        return self._load_sequence(seq_name)
+
+    @property
+    def name(self) -> str:
+        return f"GOT-10k-{self.split}"
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _get_seq_names(self) -> List[str]:
+        """Return (and cache) the ordered list of sequence names for this split.
 
         Reads ``list.txt`` when present; falls back to enumerating
         subdirectories that contain an ``img/`` folder.
@@ -92,19 +122,21 @@ class GOT10kDataset(BaseDataset):
         self._seq_names = names
         return self._seq_names
 
-    def load_sequence(self, seq_name: str) -> Sequence:
+    def _load_sequence(self, seq_name: str) -> Sequence:
         """Load a single GOT-10k sequence by name.
+
+        Frames are referenced by path (lazy I/O) rather than pre-loaded,
+        matching the :class:`~eovot.datasets.base.Sequence` contract.
 
         Args:
             seq_name: Sequence folder name (e.g. ``"GOT-10k_Val_000001"``).
 
         Returns:
-            :class:`~eovot.datasets.base.Sequence` with frames and GT boxes
-            aligned to the same length.
+            :class:`~eovot.datasets.base.Sequence` with frame paths and GT
+            boxes aligned to the same length.
 
         Raises:
             FileNotFoundError: If ``groundtruth.txt`` or ``img/`` are missing.
-            IOError: If any frame image cannot be decoded by OpenCV.
         """
         seq_dir = self._split_dir / seq_name
 
@@ -121,30 +153,18 @@ class GOT10kDataset(BaseDataset):
         if not img_dir.is_dir():
             raise FileNotFoundError(f"img/ directory not found at {img_dir}")
 
+        # Collect paths in chronological order; merge JPG and PNG.
         frame_paths = sorted(img_dir.glob("*.jpg")) + sorted(img_dir.glob("*.png"))
-        frame_paths = sorted(frame_paths)  # ensure chronological order after merge
+        frame_paths = sorted(frame_paths)
         if not frame_paths:
             raise FileNotFoundError(f"No JPEG/PNG frames found in {img_dir}")
 
         # Align frame count and GT length (some sequences may differ by one).
         n = min(len(frame_paths), len(gt_boxes))
-        frame_paths = frame_paths[:n]
-        gt_boxes = gt_boxes[:n]
+        frame_paths_str = [str(p) for p in frame_paths[:n]]
+        gt_array = np.array(gt_boxes[:n], dtype=np.float64)
 
-        frames = [cv2.imread(str(p)) for p in frame_paths]
-        bad = [str(frame_paths[i]) for i, f in enumerate(frames) if f is None]
-        if bad:
-            raise IOError(f"OpenCV failed to decode {len(bad)} frame(s): {bad[:3]} ...")
-
-        return Sequence(name=seq_name, frames=frames, gt_boxes=gt_boxes)
-
-    @property
-    def name(self) -> str:
-        return f"GOT-10k-{self.split}"
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
+        return Sequence(name=seq_name, frame_paths=frame_paths_str, ground_truth=gt_array)
 
     @staticmethod
     def _load_groundtruth(gt_file: Path) -> List[BBox]:
