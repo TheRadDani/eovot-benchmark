@@ -345,7 +345,7 @@ If you use this project in your research, please cite:
 ```
 @misc{eovot2026,
   title={EOVOT: Edge-Optimized Visual Object Tracking Benchmark Suite},
-  author={Your Name},
+  author={Luis Daniel Ferreto-Chavarria},
   year={2026},
   note={Open-source project}
 }

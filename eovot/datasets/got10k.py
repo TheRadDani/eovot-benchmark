@@ -38,6 +38,13 @@ from .base import BaseDataset, BBox, Sequence
 class GOT10kDataset(BaseDataset):
     """Dataset loader for GOT-10k (train / val / test splits).
 
+    Implements the :class:`~eovot.datasets.base.BaseDataset` interface via
+    ``__len__`` and ``__getitem__``, so it works directly with
+    :class:`~eovot.benchmark.engine.BenchmarkEngine`.
+
+    Frames are loaded lazily on iteration (not pre-loaded into RAM), keeping
+    memory usage constant regardless of dataset size.
+
     Args:
         root: Path to the GOT-10k root directory.  Must contain
             ``train/``, ``val/``, or ``test/`` subdirectories.
@@ -102,8 +109,11 @@ class GOT10kDataset(BaseDataset):
         self._seq_names = names
         return self._seq_names
 
-    def load_sequence(self, seq_name: str) -> Sequence:
+    def _load_sequence(self, seq_name: str) -> Sequence:
         """Load a single GOT-10k sequence by name.
+
+        Frames are referenced by path (lazy I/O) rather than pre-loaded,
+        matching the :class:`~eovot.datasets.base.Sequence` contract.
 
         Args:
             seq_name: Sequence folder name (e.g. ``"GOT-10k_Val_000001"``).
@@ -131,8 +141,9 @@ class GOT10kDataset(BaseDataset):
         if not img_dir.is_dir():
             raise FileNotFoundError(f"img/ directory not found at {img_dir}")
 
+        # Collect paths in chronological order; merge JPG and PNG.
         frame_paths = sorted(img_dir.glob("*.jpg")) + sorted(img_dir.glob("*.png"))
-        frame_paths = sorted(frame_paths)  # ensure chronological order after merge
+        frame_paths = sorted(frame_paths)
         if not frame_paths:
             raise FileNotFoundError(f"No JPEG/PNG frames found in {img_dir}")
 
@@ -151,9 +162,7 @@ class GOT10kDataset(BaseDataset):
     def name(self) -> str:
         return f"GOT-10k-{self.split}"
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
+        return Sequence(name=seq_name, frame_paths=frame_paths_str, ground_truth=gt_array)
 
     @staticmethod
     def _load_groundtruth(gt_file: Path) -> List[BBox]:

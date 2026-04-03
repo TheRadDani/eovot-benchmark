@@ -1,3 +1,4 @@
 from .reporter import BenchmarkReporter
+from .visualizer import BenchmarkVisualizer
 
-__all__ = ["BenchmarkReporter"]
+__all__ = ["BenchmarkReporter", "BenchmarkVisualizer"]

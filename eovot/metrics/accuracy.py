@@ -178,11 +178,14 @@ class MetricsEngine:
         """
         ious = self.batch_iou(preds, gts)
 
+        # np.trapezoid was introduced in NumPy 2.0; np.trapz was removed in 2.0.
+        _trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz  # type: ignore[attr-defined]
+
         thr_iou, sr = self.success_curve(ious)
-        success_auc = float(np.trapz(sr, thr_iou))
+        success_auc = float(_trapezoid(sr, thr_iou))
 
         thr_dist, pr = self.precision_curve(preds, gts)
-        prec_auc = float(np.trapz(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
+        prec_auc = float(_trapezoid(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
 
         return AccuracyMetrics(
             mean_iou=float(ious.mean()),
