@@ -38,6 +38,13 @@ from .base import BaseDataset, BBox, Sequence
 class GOT10kDataset(BaseDataset):
     """Dataset loader for GOT-10k (train / val / test splits).
 
+    Implements the :class:`~eovot.datasets.base.BaseDataset` interface via
+    ``__len__`` and ``__getitem__``, so it works directly with
+    :class:`~eovot.benchmark.engine.BenchmarkEngine`.
+
+    Frames are loaded lazily on iteration (not pre-loaded into RAM), keeping
+    memory usage constant regardless of dataset size.
+
     Args:
         root: Path to the GOT-10k root directory.  Must contain
             ``train/``, ``val/``, or ``test/`` subdirectories.
@@ -72,7 +79,10 @@ class GOT10kDataset(BaseDataset):
         return len(self.list_sequences())
 
     def __getitem__(self, idx: int) -> Sequence:
-        return self.load_sequence(self.list_sequences()[idx])
+        names = self.list_sequences()
+        if idx < 0 or idx >= len(names):
+            raise IndexError(f"Sequence index {idx} out of range [0, {len(names)})")
+        return self.load_sequence(names[idx])
 
     def list_sequences(self) -> List[str]:
         """Return the list of sequence names for this split.
@@ -99,15 +109,19 @@ class GOT10kDataset(BaseDataset):
         self._seq_names = names
         return self._seq_names
 
-    def load_sequence(self, seq_name: str) -> Sequence:
+    def _load_sequence(self, seq_name: str) -> Sequence:
         """Load a single GOT-10k sequence by name.
+
+        Frames are referenced by path (lazy I/O) rather than pre-loaded,
+        matching the :class:`~eovot.datasets.base.Sequence` contract.
 
         Args:
             seq_name: Sequence folder name (e.g. ``"GOT-10k_Val_000001"``).
 
         Returns:
             :class:`~eovot.datasets.base.Sequence` with frame paths and GT
-            boxes aligned to the same length.
+            boxes aligned to the same length.  Frames are loaded lazily on
+            iteration — no images are read into memory here.
 
         Raises:
             FileNotFoundError: If ``groundtruth.txt`` or ``img/`` are missing.
@@ -127,25 +141,28 @@ class GOT10kDataset(BaseDataset):
         if not img_dir.is_dir():
             raise FileNotFoundError(f"img/ directory not found at {img_dir}")
 
+        # Collect paths in chronological order; merge JPG and PNG.
         frame_paths = sorted(img_dir.glob("*.jpg")) + sorted(img_dir.glob("*.png"))
-        frame_paths = [str(p) for p in sorted(frame_paths)]
+        frame_paths = sorted(frame_paths)
         if not frame_paths:
             raise FileNotFoundError(f"No JPEG/PNG frames found in {img_dir}")
 
         # Align frame count and GT length (some sequences may differ by one).
         n = min(len(frame_paths), len(gt_boxes))
         frame_paths = frame_paths[:n]
-        gt_array = np.array(gt_boxes[:n], dtype=np.float64)
+        gt_boxes = gt_boxes[:n]
 
-        return Sequence(name=seq_name, frame_paths=frame_paths, ground_truth=gt_array)
+        return Sequence(
+            name=seq_name,
+            frame_paths=[str(p) for p in frame_paths],
+            ground_truth=np.array(gt_boxes, dtype=np.float64),
+        )
 
     @property
     def name(self) -> str:
         return f"GOT-10k-{self.split}"
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
+        return Sequence(name=seq_name, frame_paths=frame_paths_str, ground_truth=gt_array)
 
     @staticmethod
     def _load_groundtruth(gt_file: Path) -> List[BBox]:

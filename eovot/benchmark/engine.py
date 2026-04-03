@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from ..datasets.base import BaseDataset, Sequence
-from ..metrics.accuracy import MetricsEngine
+from ..metrics.accuracy import MetricsEngine, center_distance
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
 
@@ -18,10 +18,20 @@ class SequenceResult:
     sequence_name: str
     ious: np.ndarray
     profiling: ProfilingResult
+    predictions: Optional[np.ndarray] = None       # shape (N, 4) — predicted boxes
+    ground_truths: Optional[np.ndarray] = None     # shape (N, 4) — GT boxes aligned to predictions
+    center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
 
     @property
     def mean_iou(self) -> float:
         return float(self.ious.mean()) if len(self.ious) else 0.0
+
+    @property
+    def mean_center_distance(self) -> Optional[float]:
+        """Mean centre-distance in pixels, or None if not stored."""
+        if self.center_distances is None or len(self.center_distances) == 0:
+            return None
+        return float(self.center_distances.mean())
 
 
 @dataclass
@@ -36,6 +46,17 @@ class BenchmarkResult:
         return float(all_ious.mean()) if len(all_ious) else 0.0
 
     @property
+    def mean_center_distance(self) -> Optional[float]:
+        """Mean centre-distance across all sequences in pixels, or None if not stored."""
+        dists = [
+            r.center_distances for r in self.sequence_results
+            if r.center_distances is not None
+        ]
+        if not dists:
+            return None
+        return float(np.concatenate(dists).mean())
+
+    @property
     def mean_fps(self) -> float:
         return float(np.mean([r.profiling.fps for r in self.sequence_results]))
 
@@ -43,14 +64,79 @@ class BenchmarkResult:
     def peak_memory_mb(self) -> float:
         return float(np.max([r.profiling.peak_memory_mb for r in self.sequence_results]))
 
+    @property
+    def total_energy_j(self) -> Optional[float]:
+        """Sum of per-sequence energy estimates (Joules), or ``None`` if not profiled."""
+        with_energy = [r for r in self.sequence_results if r.energy is not None]
+        if not with_energy:
+            return None
+        return sum(r.energy.total_energy_j for r in with_energy)
+
+    @property
+    def mean_energy_per_frame_mj(self) -> Optional[float]:
+        """Mean per-frame energy across all sequences (milli-Joules), or ``None``."""
+        with_energy = [r for r in self.sequence_results if r.energy is not None]
+        if not with_energy:
+            return None
+        return float(np.mean([r.energy.energy_per_frame_mj for r in with_energy]))
+
     def summary(self) -> Dict:
-        return {
+        d: Dict = {
             "tracker": self.tracker_name,
             "dataset": self.dataset_name,
             "num_sequences": len(self.sequence_results),
             "mean_iou": round(self.mean_iou, 4),
             "mean_fps": round(self.mean_fps, 2),
             "peak_memory_mb": round(self.peak_memory_mb, 2),
+        }
+        mcd = self.mean_center_distance
+        if mcd is not None:
+            d["mean_center_distance_px"] = round(mcd, 3)
+        return d
+
+    def to_dict(self) -> Dict:
+        """Serialise to the dict format consumed by :class:`~eovot.reporting.reporter.BenchmarkReporter`.
+
+        Returns a dict with two keys:
+
+        * ``"summary"`` — aggregate scalar metrics (same as :meth:`summary`).
+        * ``"sequences"`` — list of per-sequence metric dicts.
+        """
+        sequences = []
+        for sr in self.sequence_results:
+            entry: Dict = {
+                "sequence_name": sr.sequence_name,
+                "mean_iou": round(sr.mean_iou, 4),
+                "fps": round(sr.profiling.fps, 2),
+                "mean_latency_ms": round(sr.profiling.latency_mean_ms, 3),
+                "peak_memory_mb": round(sr.profiling.peak_memory_mb, 2),
+            }
+            if sr.energy is not None:
+                entry["energy_j"] = round(sr.energy.total_energy_j, 6)
+                entry["energy_per_frame_mj"] = round(sr.energy.energy_per_frame_mj, 4)
+            sequences.append(entry)
+        return {"summary": self.summary(), "sequences": sequences}
+
+    def to_dict(self) -> Dict:
+        """Serialise to the dict format consumed by :class:`~eovot.reporting.reporter.BenchmarkReporter`.
+
+        Returns a dict with two keys:
+
+        * ``"summary"`` — aggregate scalar metrics (same as :meth:`summary`).
+        * ``"sequences"`` — list of per-sequence metric dicts.
+        """
+        return {
+            "summary": self.summary(),
+            "sequences": [
+                {
+                    "sequence_name": sr.sequence_name,
+                    "mean_iou": round(sr.mean_iou, 4),
+                    "fps": round(sr.profiling.fps, 2),
+                    "mean_latency_ms": round(sr.profiling.latency_mean_ms, 3),
+                    "peak_memory_mb": round(sr.profiling.peak_memory_mb, 2),
+                }
+                for sr in self.sequence_results
+            ],
         }
 
     def to_dict(self) -> Dict:
@@ -74,20 +160,35 @@ class BenchmarkResult:
 
     def __str__(self) -> str:
         s = self.summary()
-        return (
+        base = (
             f"BenchmarkResult[{s['tracker']} on {s['dataset']}] "
             f"mIoU={s['mean_iou']}  FPS={s['mean_fps']}  "
             f"mem={s['peak_memory_mb']} MiB  ({s['num_sequences']} sequences)"
         )
+        if "total_energy_j" in s:
+            base += f"  energy={s['total_energy_j']} J"
+        return base
 
 
 class BenchmarkEngine:
-    """Run a tracker against a dataset and collect accuracy + profiling data."""
+    """Run a tracker against a dataset and collect accuracy + profiling data.
 
-    def __init__(self, verbose: bool = True) -> None:
+    Args:
+        verbose: Print per-sequence progress to stdout. Default: ``True``.
+        tdp_watts: If provided, enables CPU energy estimation using
+            :class:`~eovot.profiling.energy.EnergyProfiler` with this TDP
+            value (Watts).  Set to the device's CPU TDP for meaningful
+            estimates (e.g. ``6.0`` for Raspberry Pi 4, ``15.0`` for a
+            laptop).  Default: ``None`` (energy profiling disabled).
+    """
+
+    def __init__(self, verbose: bool = True, tdp_watts: Optional[float] = None) -> None:
         self.verbose = verbose
         self._metrics = MetricsEngine()
         self._profiler = Profiler()
+        self._energy_profiler: Optional[EnergyProfiler] = (
+            EnergyProfiler(tdp_watts=tdp_watts) if tdp_watts is not None else None
+        )
 
     def run(
         self,
@@ -101,7 +202,8 @@ class BenchmarkEngine:
         n = min(len(dataset), max_sequences) if max_sequences is not None else len(dataset)
 
         if self.verbose:
-            print(f"\nEvaluating {tracker.name} on {dataset_name} ({n} sequences)")
+            energy_tag = f"  [energy TDP={self._energy_profiler.tdp_watts}W]" if self._energy_profiler else ""
+            print(f"\nEvaluating {tracker.name} on {dataset_name} ({n} sequences){energy_tag}")
             print("-" * 60)
 
         for idx in range(n):
@@ -109,10 +211,14 @@ class BenchmarkEngine:
             seq_result = self._run_sequence(tracker, seq)
             result.sequence_results.append(seq_result)
             if self.verbose:
+                energy_str = ""
+                if seq_result.energy is not None:
+                    energy_str = f"  E={seq_result.energy.energy_per_frame_mj:.2f}mJ/fr"
                 print(
                     f"  [{idx + 1:>3}/{n}] {seq_result.sequence_name:<30s} "
                     f"mIoU={seq_result.mean_iou:.3f}  "
                     f"FPS={seq_result.profiling.fps:.1f}"
+                    f"{energy_str}"
                 )
 
         if self.verbose:
@@ -123,6 +229,9 @@ class BenchmarkEngine:
 
     def _run_sequence(self, tracker: BaseTracker, seq: Sequence) -> SequenceResult:
         self._profiler.reset()
+        if self._energy_profiler is not None:
+            self._energy_profiler.reset()
+
         frames = list(seq)
         gt = seq.ground_truth
         preds: List = []
@@ -133,16 +242,40 @@ class BenchmarkEngine:
                 preds.append(seq.init_bbox)
             else:
                 self._profiler.start_frame()
+                if self._energy_profiler is not None:
+                    self._energy_profiler.start_frame()
                 bbox = tracker.update(frame)
                 self._profiler.end_frame()
+                if self._energy_profiler is not None:
+                    self._energy_profiler.end_frame()
                 preds.append(bbox)
 
         preds_arr = np.array(preds, dtype=np.float64)
         n_eval = min(len(preds_arr), len(gt))
-        ious = self._metrics.batch_iou(preds_arr[:n_eval], gt[:n_eval])
+        preds_eval = preds_arr[:n_eval]
+        gt_eval = gt[:n_eval]
+
+        ious = self._metrics.batch_iou(preds_eval, gt_eval)
+
+        # Compute per-frame centre-distances so precision curves use real data.
+        dists = np.array(
+            [center_distance(tuple(preds_eval[i]), tuple(gt_eval[i]))  # type: ignore[arg-type]
+             for i in range(n_eval)],
+            dtype=np.float64,
+        )
+
+        energy: Optional[EnergyResult] = None
+        if self._energy_profiler is not None:
+            try:
+                energy = self._energy_profiler.summary(tracker.name)
+            except ValueError:
+                pass  # sequence too short (0 update frames)
 
         return SequenceResult(
             sequence_name=seq.name,
             ious=ious,
             profiling=self._profiler.summary(tracker.name),
+            predictions=preds_eval,
+            ground_truths=gt_eval,
+            center_distances=dists,
         )
