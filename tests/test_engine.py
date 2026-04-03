@@ -157,3 +157,55 @@ class TestBenchmarkEngine:
         result = self.engine.run(tracker, self.dataset, dataset_name="Synthetic")
         assert result.mean_iou < 1.0
         assert result.mean_iou > 0.0  # still some overlap
+
+    def test_sequence_result_stores_predictions(self):
+        """Engine must store per-frame predictions on each SequenceResult."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        for sr in result.sequence_results:
+            assert sr.predictions is not None, "predictions should not be None"
+            assert sr.predictions.shape == (NUM_FRAMES, 4)
+
+    def test_sequence_result_stores_ground_truths(self):
+        """Engine must store GT boxes aligned to predictions on each SequenceResult."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        for sr in result.sequence_results:
+            assert sr.ground_truths is not None, "ground_truths should not be None"
+            assert sr.ground_truths.shape == (NUM_FRAMES, 4)
+
+    def test_sequence_result_stores_center_distances(self):
+        """Engine must store per-frame centre-distances on each SequenceResult."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        for sr in result.sequence_results:
+            assert sr.center_distances is not None, "center_distances should not be None"
+            assert sr.center_distances.shape == (NUM_FRAMES,)
+            assert (sr.center_distances >= 0.0).all(), "distances must be non-negative"
+
+    def test_perfect_tracker_zero_center_distance(self):
+        """A tracker predicting exact GT boxes should have centre-distance = 0 everywhere."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        for sr in result.sequence_results:
+            np.testing.assert_allclose(
+                sr.center_distances, 0.0, atol=1e-9,
+                err_msg="Perfect tracker should have zero centre-distances",
+            )
+
+    def test_mean_center_distance_on_result(self):
+        """BenchmarkResult.mean_center_distance aggregates across sequences."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        mcd = result.mean_center_distance
+        assert mcd is not None
+        assert mcd == pytest.approx(0.0)
+
+    def test_summary_includes_center_distance(self):
+        """summary() should include mean_center_distance_px when data is stored."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        s = result.summary()
+        assert "mean_center_distance_px" in s
+
+    def test_imperfect_tracker_nonzero_center_distance(self):
+        """A shifted-box tracker must have non-zero mean centre-distance."""
+        shifted_box = (30.0, 30.0, 50.0, 50.0)
+        tracker = ConstantTracker(shifted_box)
+        result = self.engine.run(tracker, self.dataset, dataset_name="Synthetic")
+        assert result.mean_center_distance is not None
+        assert result.mean_center_distance > 0.0
