@@ -37,7 +37,8 @@ from eovot.datasets.lasot import LaSOTDataset
 from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.mosse import MOSSETracker
 from eovot.trackers.kcf import KCFTracker
-from eovot.trackers.mil import MILTracker
+from eovot.trackers.csrt import CSRTTracker
+from eovot.trackers.median_flow import MedianFlowTracker
 
 
 # ------------------------------------------------------------------ #
@@ -47,10 +48,8 @@ from eovot.trackers.mil import MILTracker
 TRACKER_REGISTRY: Dict[str, Any] = {
     "MOSSE": MOSSETracker,
     "KCF": KCFTracker,
-    "MIL": MILTracker,
-    # DL-based trackers (require ONNX model files — see eovot/trackers/opencv_dl.py)
-    # "DaSiamRPN": lambda: DaSiamRPNTracker(model=..., kernel_r1=..., kernel_cls1=...),
-    # "NanoTrack": lambda: NanoTracker(backbone=..., neckhead=...),
+    "CSRT": CSRTTracker,
+    "MedianFlow": MedianFlowTracker,
 }
 
 
