@@ -32,6 +32,9 @@ import yaml
 
 from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
+from eovot.datasets.got10k import GOT10kDataset
+from eovot.datasets.lasot import LaSOTDataset
+from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.mosse import MOSSETracker
 
 
@@ -41,6 +44,7 @@ from eovot.trackers.mosse import MOSSETracker
 
 TRACKER_REGISTRY: Dict[str, Any] = {
     "MOSSE": MOSSETracker,
+    "KCF": KCFTracker,
 }
 
 
@@ -50,6 +54,8 @@ TRACKER_REGISTRY: Dict[str, Any] = {
 
 DATASET_REGISTRY: Dict[str, Any] = {
     "OTBDataset": OTBDataset,
+    "GOT10kDataset": GOT10kDataset,
+    "LaSOTDataset": LaSOTDataset,
 }
 
 
@@ -82,6 +88,7 @@ def _config_from_args(args: argparse.Namespace) -> Dict:
         },
         "benchmark": {
             "verbose": not args.quiet,
+            "tdp_watts": args.tdp_watts,
         },
         "reporting": {
             "formats": ["json"],
@@ -102,7 +109,15 @@ def run_from_config(cfg: Dict) -> None:
     if loader_cls is None:
         print(f"[ERROR] Unknown dataset loader: {ds_cfg['loader']}", file=sys.stderr)
         sys.exit(1)
-    dataset = loader_cls(ds_cfg["root"])
+    loader_name = ds_cfg.get("loader", "OTBDataset")
+    if loader_name in ("GOT10kDataset", "LaSOTDataset"):
+        dataset = loader_cls(
+            ds_cfg["root"],
+            split=ds_cfg.get("split", "val"),
+            max_sequences=ds_cfg.get("max_sequences"),
+        )
+    else:
+        dataset = loader_cls(ds_cfg["root"])
 
     # --- Tracker ---
     tr_cfg = cfg["tracker"]
@@ -119,7 +134,10 @@ def run_from_config(cfg: Dict) -> None:
 
     # --- Engine ---
     bm_cfg = cfg.get("benchmark", {})
-    engine = BenchmarkEngine(verbose=bm_cfg.get("verbose", True))
+    engine = BenchmarkEngine(
+        verbose=bm_cfg.get("verbose", True),
+        tdp_watts=bm_cfg.get("tdp_watts"),
+    )
 
     result = engine.run(
         tracker=tracker,
@@ -190,6 +208,11 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Directory for output reports (default: results/).")
     parser.add_argument("--quiet", action="store_true",
                         help="Suppress per-sequence progress output.")
+    parser.add_argument("--tdp-watts", type=float, default=None, metavar="W",
+                        help=(
+                            "Enable CPU energy estimation with this TDP (Watts). "
+                            "E.g. 6.0 for Raspberry Pi 4, 15.0 for a laptop."
+                        ))
     return parser
 
 
