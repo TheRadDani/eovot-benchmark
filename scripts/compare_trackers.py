@@ -26,6 +26,12 @@ Usage::
         --dataset-loader GOT10kDataset \\
         --dataset-root /data/GOT-10k \\
         --split val
+
+    # With CPU energy estimation (laptop TDP)
+    python scripts/compare_trackers.py \\
+        --trackers MOSSE KCF \\
+        --dataset-root /data/OTB100 \\
+        --tdp-watts 15.0
 """
 
 from __future__ import annotations
@@ -37,9 +43,10 @@ from pathlib import Path
 # Allow running as ``python scripts/compare_trackers.py`` from the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from eovot.benchmark.engine import BenchmarkConfig, BenchmarkEngine
+from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
+from eovot.datasets.lasot import LaSOTDataset
 from eovot.reporting.reporter import BenchmarkReporter
 from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.mosse import MOSSETracker
@@ -56,7 +63,18 @@ TRACKER_REGISTRY = {
 DATASET_REGISTRY = {
     "OTBDataset": OTBDataset,
     "GOT10kDataset": GOT10kDataset,
+    "LaSOTDataset": LaSOTDataset,
 }
+
+
+def _build_dataset(loader_name: str, root: str, split: str, max_sequences):
+    """Instantiate the dataset, handling different constructor signatures."""
+    cls = DATASET_REGISTRY[loader_name]
+    if loader_name == "GOT10kDataset":
+        return cls(root=root, split=split, max_sequences=max_sequences)
+    if loader_name == "LaSOTDataset":
+        return cls(root=root, split=split, max_sequences=max_sequences)
+    return cls(root=root)
 
 
 def main() -> None:
@@ -92,7 +110,7 @@ def main() -> None:
     parser.add_argument(
         "--split",
         default="val",
-        help="Dataset split (for GOT-10k: train | val | test).",
+        help="Dataset split (for GOT-10k: train | val | test; for LaSOT: train | test | all).",
     )
     parser.add_argument(
         "--max-sequences",
@@ -105,12 +123,21 @@ def main() -> None:
         default="results/",
         help="Directory where JSON, CSV, and Markdown reports are saved.",
     )
+    parser.add_argument(
+        "--tdp-watts",
+        type=float,
+        default=None,
+        metavar="W",
+        help=(
+            "Enable CPU energy estimation using this TDP value in Watts. "
+            "Example: 6.0 for Raspberry Pi 4, 15.0 for a laptop CPU."
+        ),
+    )
     args = parser.parse_args()
 
     dataset_name = args.dataset_name or args.dataset_loader
     reporter = BenchmarkReporter(output_dir=args.output_dir)
-    config = BenchmarkConfig(max_sequences=args.max_sequences, verbose=True)
-    engine = BenchmarkEngine(config=config)
+    engine = BenchmarkEngine(verbose=True)
 
     all_results = []
 
@@ -120,6 +147,9 @@ def main() -> None:
         print(f"{'=' * 60}")
 
         tracker = TRACKER_REGISTRY[tracker_name]()
+        dataset = _build_dataset(
+            args.dataset_loader, args.dataset_root, args.split, args.max_sequences
+        )
 
         dataset_cls = DATASET_REGISTRY[args.dataset_loader]
         if args.dataset_loader == "GOT10kDataset":
@@ -131,17 +161,22 @@ def main() -> None:
         else:
             dataset = dataset_cls(root=args.dataset_root)
 
-        result = engine.run(tracker, dataset)
-        result["summary"].setdefault("dataset_name", dataset_name)
+        result = engine.run(
+            tracker=tracker,
+            dataset=dataset,
+            dataset_name=dataset_name,
+            max_sequences=args.max_sequences,
+        )
+        result_dict = result.to_dict()
 
-        reporter.print_summary(result)
+        reporter.print_summary(result_dict)
 
         run_name = f"{tracker_name}-{dataset_name}"
-        saved = reporter.save_all(result, name=run_name)
+        saved = reporter.save_all(result_dict, name=run_name)
         for fmt, path in saved.items():
             print(f"  [{fmt.upper()}] saved → {path}")
 
-        all_results.append(result)
+        all_results.append(result_dict)
 
     # -----------------------------------------------------------------------
     # Comparison table (only meaningful with 2+ trackers)
