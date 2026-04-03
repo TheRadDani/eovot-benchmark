@@ -164,37 +164,35 @@ class BenchmarkVisualizer:
         Returns:
             Path to the saved PNG file.
         """
-        from ..metrics.accuracy import center_distance
-
         fig, ax = plt.subplots(figsize=self.figsize)
         thresholds = np.linspace(0.0, 50.0, 51)
         ref_thresh = 20.0  # canonical OTB precision score threshold
 
         for i, result in enumerate(results):
-            all_dists: List[float] = []
-            for sr in result.sequence_results:
-                seq = sr  # SequenceResult
-                # Recompute centre distances from stored IoUs is not possible
-                # without predictions; skip if no gt is available on result.
-                # We use a placeholder of 0 distances when preds are absent.
-                # (Full precision curve requires storing predictions — tracked
-                # as a future improvement in the benchmark engine.)
-                _ = seq  # suppress unused warning
-            # Fall back to IoU-derived approximate distances when raw
-            # predictions are not stored (1-IoU maps roughly to error).
-            all_ious = np.concatenate([sr.ious for sr in result.sequence_results])
-            # Approximate: use a linear mapping from IoU→distance space
-            # dist ≈ (1 - IoU) * 50   (heuristic for visualisation purposes)
-            approx_dists = (1.0 - all_ious) * 50.0
+            # Use stored per-frame centre-distances when available (engine >= v0.2).
+            # Fall back to an IoU-derived approximation for older result objects.
+            has_real_dists = all(
+                sr.center_distances is not None for sr in result.sequence_results
+            )
+            if has_real_dists:
+                all_dists = np.concatenate(
+                    [sr.center_distances for sr in result.sequence_results]
+                )
+            else:
+                # Heuristic: dist ≈ (1 - IoU) × 50 px — retained for backward
+                # compatibility with results produced by older engine versions.
+                all_ious = np.concatenate([sr.ious for sr in result.sequence_results])
+                all_dists = (1.0 - all_ious) * 50.0
 
-            rates = np.array([(approx_dists < t).mean() for t in thresholds])
-            score_at_20 = float((approx_dists < ref_thresh).mean())
+            rates = np.array([(all_dists < t).mean() for t in thresholds])
+            score_at_20 = float((all_dists < ref_thresh).mean())
             color = _PALETTE[i % len(_PALETTE)]
+            label_suffix = "" if has_real_dists else " (approx)"
             ax.plot(
                 thresholds, rates,
                 color=color,
                 linewidth=2,
-                label=f"{result.tracker_name} [@20px={score_at_20:.3f}]",
+                label=f"{result.tracker_name} [@20px={score_at_20:.3f}]{label_suffix}",
             )
 
         ax.axvline(x=ref_thresh, color="gray", linestyle=":", linewidth=1.2,
