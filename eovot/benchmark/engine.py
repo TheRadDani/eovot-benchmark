@@ -139,6 +139,25 @@ class BenchmarkResult:
             ],
         }
 
+    def to_dict(self) -> Dict:
+        """Serialize the full result to a dict compatible with :class:`~eovot.reporting.reporter.BenchmarkReporter`.
+
+        Returns a nested dict with keys ``"summary"`` (aggregate metrics)
+        and ``"sequences"`` (per-sequence breakdown), suitable for JSON
+        export and Markdown table generation.
+        """
+        sequences = [
+            {
+                "sequence_name": r.sequence_name,
+                "mean_iou": round(r.mean_iou, 4),
+                "fps": round(r.profiling.fps, 2),
+                "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
+                "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
+            }
+            for r in self.sequence_results
+        ]
+        return {"summary": self.summary(), "sequences": sequences}
+
     def __str__(self) -> str:
         s = self.summary()
         base = (
