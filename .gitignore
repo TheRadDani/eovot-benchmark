@@ -39,4 +39,9 @@
 
 # debug information files
 *.dwo
-tests/__pycache__
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
