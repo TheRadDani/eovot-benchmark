@@ -51,14 +51,8 @@ class GOT10kDataset(BaseDataset):
         split: Dataset split — one of ``"train"``, ``"val"``, ``"test"``.
             Default: ``"val"``.
         max_sequences: Optional upper limit on the number of sequences
-            returned.  Useful for quick smoke tests without downloading the
-            full dataset.
-
-    Example::
-
-        dataset = GOT10kDataset("/data/GOT-10k", split="val", max_sequences=10)
-        for seq in dataset:
-            print(seq.name, len(seq))
+            returned.  Useful for quick smoke tests without downloading
+            the full dataset.
     """
 
     SPLITS = ("train", "val", "test")
@@ -71,7 +65,6 @@ class GOT10kDataset(BaseDataset):
     ) -> None:
         if split not in self.SPLITS:
             raise ValueError(f"split must be one of {self.SPLITS!r}, got {split!r}")
-        # BaseDataset has no constructor parameters — do NOT forward kwargs.
         self.root = root
         self.split = split
         self.max_sequences = max_sequences
@@ -83,22 +76,16 @@ class GOT10kDataset(BaseDataset):
     # ------------------------------------------------------------------
 
     def __len__(self) -> int:
-        return len(self._get_seq_names())
+        return len(self.list_sequences())
 
     def __getitem__(self, idx: int) -> Sequence:
-        seq_name = self._get_seq_names()[idx]
-        return self._load_sequence(seq_name)
+        names = self.list_sequences()
+        if idx < 0 or idx >= len(names):
+            raise IndexError(f"Sequence index {idx} out of range [0, {len(names)})")
+        return self.load_sequence(names[idx])
 
-    @property
-    def name(self) -> str:
-        return f"GOT-10k-{self.split}"
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
-    def _get_seq_names(self) -> List[str]:
-        """Return (and cache) the ordered list of sequence names for this split.
+    def list_sequences(self) -> List[str]:
+        """Return the list of sequence names for this split.
 
         Reads ``list.txt`` when present; falls back to enumerating
         subdirectories that contain an ``img/`` folder.
@@ -133,7 +120,8 @@ class GOT10kDataset(BaseDataset):
 
         Returns:
             :class:`~eovot.datasets.base.Sequence` with frame paths and GT
-            boxes aligned to the same length.
+            boxes aligned to the same length.  Frames are loaded lazily on
+            iteration — no images are read into memory here.
 
         Raises:
             FileNotFoundError: If ``groundtruth.txt`` or ``img/`` are missing.
@@ -161,8 +149,18 @@ class GOT10kDataset(BaseDataset):
 
         # Align frame count and GT length (some sequences may differ by one).
         n = min(len(frame_paths), len(gt_boxes))
-        frame_paths_str = [str(p) for p in frame_paths[:n]]
-        gt_array = np.array(gt_boxes[:n], dtype=np.float64)
+        frame_paths = frame_paths[:n]
+        gt_boxes = gt_boxes[:n]
+
+        return Sequence(
+            name=seq_name,
+            frame_paths=[str(p) for p in frame_paths],
+            ground_truth=np.array(gt_boxes, dtype=np.float64),
+        )
+
+    @property
+    def name(self) -> str:
+        return f"GOT-10k-{self.split}"
 
         return Sequence(name=seq_name, frame_paths=frame_paths_str, ground_truth=gt_array)
 

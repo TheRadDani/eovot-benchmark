@@ -117,6 +117,28 @@ class BenchmarkResult:
             sequences.append(entry)
         return {"summary": self.summary(), "sequences": sequences}
 
+    def to_dict(self) -> Dict:
+        """Serialise to the dict format consumed by :class:`~eovot.reporting.reporter.BenchmarkReporter`.
+
+        Returns a dict with two keys:
+
+        * ``"summary"`` — aggregate scalar metrics (same as :meth:`summary`).
+        * ``"sequences"`` — list of per-sequence metric dicts.
+        """
+        return {
+            "summary": self.summary(),
+            "sequences": [
+                {
+                    "sequence_name": sr.sequence_name,
+                    "mean_iou": round(sr.mean_iou, 4),
+                    "fps": round(sr.profiling.fps, 2),
+                    "mean_latency_ms": round(sr.profiling.latency_mean_ms, 3),
+                    "peak_memory_mb": round(sr.profiling.peak_memory_mb, 2),
+                }
+                for sr in self.sequence_results
+            ],
+        }
+
     def __str__(self) -> str:
         s = self.summary()
         base = (

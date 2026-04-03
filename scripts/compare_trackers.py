@@ -137,7 +137,7 @@ def main() -> None:
 
     dataset_name = args.dataset_name or args.dataset_loader
     reporter = BenchmarkReporter(output_dir=args.output_dir)
-    engine = BenchmarkEngine(verbose=True, tdp_watts=args.tdp_watts)
+    engine = BenchmarkEngine(verbose=True)
 
     all_results = []
 
@@ -151,14 +151,23 @@ def main() -> None:
             args.dataset_loader, args.dataset_root, args.split, args.max_sequences
         )
 
+        dataset_cls = DATASET_REGISTRY[args.dataset_loader]
+        if args.dataset_loader == "GOT10kDataset":
+            dataset = dataset_cls(
+                root=args.dataset_root,
+                split=args.split,
+                max_sequences=args.max_sequences,
+            )
+        else:
+            dataset = dataset_cls(root=args.dataset_root)
+
         result = engine.run(
-            tracker,
-            dataset,
+            tracker=tracker,
+            dataset=dataset,
             dataset_name=dataset_name,
             max_sequences=args.max_sequences,
         )
         result_dict = result.to_dict()
-        result_dict["summary"].setdefault("dataset_name", dataset_name)
 
         reporter.print_summary(result_dict)
 
