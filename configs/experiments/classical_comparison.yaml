@@ -1,0 +1,54 @@
+# EOVOT Experiment: Classical Tracker Comparison on OTB-100
+#
+# This config evaluates all four classical trackers (MOSSE, KCF, CSRT,
+# MedianFlow) on the same OTB-100 dataset slice, producing a reproducible
+# accuracy-vs-efficiency table suitable for a methods paper baseline section.
+#
+# Run a single tracker:
+#   python scripts/run_benchmark.py --config configs/experiments/classical_comparison.yaml
+#
+# Run all four and compare (after merging PR #1 and PR #2):
+#   python scripts/compare_trackers.py \
+#     --trackers MOSSE KCF CSRT MedianFlow \
+#     --dataset-root /data/OTB100 \
+#     --dataset-name OTB100 \
+#     --tdp-watts 15.0 \
+#     --output-dir results/classical-comparison/
+#
+# Expected operating points (approximate, OTB-100, Intel Core i7):
+#   Tracker     mIoU   FPS    Notes
+#   ----------  -----  -----  ----------------------------------------
+#   MOSSE        0.50  500+   Fastest; baseline reference
+#   KCF          0.55  200+   Best FPS/accuracy tradeoff for most cases
+#   MedianFlow   0.45   120   Explicit failure detection; good for MOT
+#   CSRT         0.65   40    Highest accuracy; use when FPS > 25 is OK
+#
+# Edge-deployment guidance:
+#   Raspberry Pi 4 (tdp_watts: 6.0)  → prefer MOSSE or KCF
+#   Jetson Nano   (tdp_watts: 10.0)  → KCF or CSRT with GPU support TBD
+#   Laptop CPU    (tdp_watts: 15.0)  → CSRT is comfortable
+
+experiment:
+  name: "classical-comparison-otb100"
+  output_dir: "results/classical-comparison/"
+  seed: 42
+
+dataset:
+  name: "OTB100"
+  loader: "OTBDataset"
+  root: "/data/OTB100"           # ← update to your local OTB-100 path
+  max_sequences: null            # null = full 100-sequence evaluation
+
+tracker:
+  name: "CSRT"                   # change to MOSSE / KCF / MedianFlow as needed
+  params: {}                     # CSRT uses default params (best out of the box)
+
+benchmark:
+  verbose: true
+  tdp_watts: 15.0                # laptop CPU TDP; set to 6.0 for Raspberry Pi 4
+
+reporting:
+  formats:
+    - json
+    - csv
+  print_summary: true
