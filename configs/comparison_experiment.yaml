@@ -1,0 +1,41 @@
+# EOVOT multi-tracker comparison experiment
+# ------------------------------------------
+# Evaluates MOSSE and KCF on OTB100 and GOT-10k (val split).
+# Run with:
+#
+#   python scripts/run_experiment.py --config configs/comparison_experiment.yaml
+#
+# To quickly smoke-test with 5 sequences per dataset:
+#
+#   python scripts/run_experiment.py \
+#       --config configs/comparison_experiment.yaml \
+#       --max-sequences 5
+
+experiment:
+  name: "mosse-vs-kcf-comparison"
+  output_dir: "results/comparison/"
+  seed: 42                         # RNG seed applied before each tracker init
+
+benchmark:
+  verbose: true
+  max_sequences: null              # null = all sequences; overridden by --max-sequences
+
+trackers:
+  - name: MOSSE
+    params:
+      learning_rate: 0.125         # EMA weight for filter update
+      sigma: 2.0                   # Gaussian response sigma (px)
+
+  - name: KCF
+    params: {}                     # use KCF defaults
+
+datasets:
+  - loader: OTBDataset
+    root: /data/OTB100
+    label: OTB100
+
+  - loader: GOT10kDataset
+    root: /data/GOT-10k
+    split: val
+    label: GOT-10k-val
+    max_sequences: 180             # GOT-10k val has exactly 180 sequences
