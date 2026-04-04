@@ -37,7 +37,7 @@ from pathlib import Path
 # Allow running as ``python scripts/compare_trackers.py`` from the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from eovot.benchmark.engine import BenchmarkConfig, BenchmarkEngine
+from eovot.benchmark.engine import BenchmarkConfig, BenchmarkEngine  # noqa: F401
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
 from eovot.reporting.reporter import BenchmarkReporter
@@ -131,7 +131,8 @@ def main() -> None:
         else:
             dataset = dataset_cls(root=args.dataset_root)
 
-        result = engine.run(tracker, dataset)
+        bench_result = engine.run(tracker, dataset, dataset_name=dataset_name)
+        result = bench_result.to_dict()
         result["summary"].setdefault("dataset_name", dataset_name)
 
         reporter.print_summary(result)

@@ -14,6 +14,24 @@ from ..trackers.base import BaseTracker
 
 
 @dataclass
+class BenchmarkConfig:
+    """Configuration for a benchmark run.
+
+    Attributes:
+        max_sequences: Cap on the number of sequences evaluated per dataset.
+            ``None`` means evaluate all available sequences.
+        verbose: Whether to print per-sequence progress to stdout.
+        seed: Integer seed for any stochastic components.  Currently stored
+            for reproducibility metadata; callers are responsible for seeding
+            their own RNGs before calling :meth:`BenchmarkEngine.run`.
+    """
+
+    max_sequences: Optional[int] = None
+    verbose: bool = True
+    seed: int = 42
+
+
+@dataclass
 class SequenceResult:
     sequence_name: str
     ious: np.ndarray
@@ -85,10 +103,32 @@ class BenchmarkResult:
 
 
 class BenchmarkEngine:
-    """Run a tracker against a dataset and collect accuracy + profiling data."""
+    """Run a tracker against a dataset and collect accuracy + profiling data.
 
-    def __init__(self, verbose: bool = True) -> None:
-        self.verbose = verbose
+    Can be constructed either with a :class:`BenchmarkConfig` instance or
+    with plain keyword arguments for convenience::
+
+        # Using BenchmarkConfig
+        cfg = BenchmarkConfig(max_sequences=10, verbose=True)
+        engine = BenchmarkEngine(config=cfg)
+
+        # Using plain kwargs (backwards-compatible)
+        engine = BenchmarkEngine(verbose=True)
+    """
+
+    def __init__(
+        self,
+        verbose: bool = True,
+        config: Optional[BenchmarkConfig] = None,
+    ) -> None:
+        if config is not None:
+            self.verbose = config.verbose
+            self._default_max_sequences = config.max_sequences
+            self.seed = config.seed
+        else:
+            self.verbose = verbose
+            self._default_max_sequences = None
+            self.seed = 42
         self._metrics = MetricsEngine()
         self._profiler = Profiler()
 
@@ -101,7 +141,9 @@ class BenchmarkEngine:
     ) -> BenchmarkResult:
         """Evaluate *tracker* on every sequence in *dataset*."""
         result = BenchmarkResult(tracker_name=tracker.name, dataset_name=dataset_name)
-        n = min(len(dataset), max_sequences) if max_sequences is not None else len(dataset)
+        # max_sequences kwarg overrides the config-level default
+        effective_max = max_sequences if max_sequences is not None else self._default_max_sequences
+        n = min(len(dataset), effective_max) if effective_max is not None else len(dataset)
 
         if self.verbose:
             print(f"\nEvaluating {tracker.name} on {dataset_name} ({n} sequences)")
