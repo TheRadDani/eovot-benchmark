@@ -1,0 +1,10 @@
+# Hardware profile: NVIDIA Jetson Nano (4-core Cortex-A57, 4 GB LPDDR4)
+# Reference: https://developer.nvidia.com/embedded/jetson-nano
+# Note: GPU energy is excluded from this profile (CPU-only estimate).
+cpu_count: 4
+total_ram_gb: 4.0
+available_ram_gb: 3.0
+device_class: embedded
+tdp_watts: 10.0
+cpu_freq_mhz: 1430.0
+platform_tag: Linux-aarch64

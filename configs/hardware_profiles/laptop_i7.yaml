@@ -1,0 +1,9 @@
+# Hardware profile: Generic laptop (Intel Core i7-10750H, 16 GB DDR4)
+# This is the reference device used for tracker baseline measurements.
+cpu_count: 12
+total_ram_gb: 16.0
+available_ram_gb: 12.0
+device_class: laptop
+tdp_watts: 15.0
+cpu_freq_mhz: 2600.0
+platform_tag: Linux-x86_64

@@ -1,0 +1,9 @@
+# Hardware profile: Raspberry Pi 4 Model B (4-core Cortex-A72, 4 GB LPDDR4)
+# Reference: https://www.raspberrypi.com/products/raspberry-pi-4-model-b/specifications/
+cpu_count: 4
+total_ram_gb: 4.0
+available_ram_gb: 3.2
+device_class: embedded
+tdp_watts: 6.0
+cpu_freq_mhz: 1500.0
+platform_tag: Linux-aarch64
