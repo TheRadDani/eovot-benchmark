@@ -12,6 +12,14 @@ Usage
         --dataset-name OTB100 \\
         --max-sequences 5
 
+    # Run KCF on GOT-10k val split with energy profiling (laptop TDP):
+    python scripts/run_benchmark.py \\
+        --tracker KCF \\
+        --dataset-loader GOT10kDataset \\
+        --dataset-root /data/GOT-10k \\
+        --split val \\
+        --tdp-watts 15.0
+
     # Installed as a package entry point:
     eovot --config configs/default.yaml
 """
@@ -32,6 +40,12 @@ import yaml
 
 from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
+from eovot.datasets.got10k import GOT10kDataset
+from eovot.datasets.lasot import LaSOTDataset
+from eovot.trackers.csrt import CSRTTracker
+from eovot.trackers.kcf import KCFTracker
+from eovot.trackers.median_flow import MedianFlowTracker
+from eovot.trackers.mil import MILTracker
 from eovot.trackers.mosse import MOSSETracker
 
 
@@ -41,6 +55,10 @@ from eovot.trackers.mosse import MOSSETracker
 
 TRACKER_REGISTRY: Dict[str, Any] = {
     "MOSSE": MOSSETracker,
+    "KCF": KCFTracker,
+    "CSRT": CSRTTracker,
+    "MedianFlow": MedianFlowTracker,
+    "MIL": MILTracker,
 }
 
 
@@ -50,6 +68,8 @@ TRACKER_REGISTRY: Dict[str, Any] = {
 
 DATASET_REGISTRY: Dict[str, Any] = {
     "OTBDataset": OTBDataset,
+    "GOT10kDataset": GOT10kDataset,
+    "LaSOTDataset": LaSOTDataset,
 }
 
 
@@ -72,8 +92,9 @@ def _config_from_args(args: argparse.Namespace) -> Dict:
         },
         "dataset": {
             "name": args.dataset_name,
-            "loader": "OTBDataset",
+            "loader": args.dataset_loader,
             "root": args.dataset_root,
+            "split": args.split,
             "max_sequences": args.max_sequences,
         },
         "tracker": {
@@ -82,6 +103,7 @@ def _config_from_args(args: argparse.Namespace) -> Dict:
         },
         "benchmark": {
             "verbose": not args.quiet,
+            "tdp_watts": args.tdp_watts,
         },
         "reporting": {
             "formats": ["json"],
@@ -98,11 +120,20 @@ def run_from_config(cfg: Dict) -> None:
     """Execute a benchmark run described by *cfg*."""
     # --- Dataset ---
     ds_cfg = cfg["dataset"]
-    loader_cls = DATASET_REGISTRY.get(ds_cfg.get("loader", "OTBDataset"))
+    loader_name = ds_cfg.get("loader", "OTBDataset")
+    loader_cls = DATASET_REGISTRY.get(loader_name)
     if loader_cls is None:
-        print(f"[ERROR] Unknown dataset loader: {ds_cfg['loader']}", file=sys.stderr)
+        print(f"[ERROR] Unknown dataset loader: {loader_name}", file=sys.stderr)
         sys.exit(1)
-    dataset = loader_cls(ds_cfg["root"])
+
+    if loader_name in ("GOT10kDataset", "LaSOTDataset"):
+        dataset = loader_cls(
+            ds_cfg["root"],
+            split=ds_cfg.get("split", "val"),
+            max_sequences=ds_cfg.get("max_sequences"),
+        )
+    else:
+        dataset = loader_cls(ds_cfg["root"])
 
     # --- Tracker ---
     tr_cfg = cfg["tracker"]
@@ -119,7 +150,10 @@ def run_from_config(cfg: Dict) -> None:
 
     # --- Engine ---
     bm_cfg = cfg.get("benchmark", {})
-    engine = BenchmarkEngine(verbose=bm_cfg.get("verbose", True))
+    engine = BenchmarkEngine(
+        verbose=bm_cfg.get("verbose", True),
+        tdp_watts=bm_cfg.get("tdp_watts"),
+    )
 
     result = engine.run(
         tracker=tracker,
@@ -141,14 +175,14 @@ def run_from_config(cfg: Dict) -> None:
         print(" BENCHMARK SUMMARY")
         print("=" * 60)
         for k, v in summary.items():
-            print(f"  {k:<22s}: {v}")
+            print(f"  {k:<28s}: {v}")
         print("=" * 60)
 
     formats = report_cfg.get("formats", ["json"])
     if "json" in formats:
         out_path = os.path.join(output_dir, f"{exp_name}.json")
         with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2)
+            json.dump(result.to_dict(), f, indent=2)
         print(f"\nResults saved to {out_path}")
 
     if "csv" in formats:
@@ -176,13 +210,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to a YAML experiment config file.",
     )
     # Convenience overrides (used when --config is not provided)
-    parser.add_argument("--tracker", default="MOSSE",
-                        choices=list(TRACKER_REGISTRY),
-                        help="Tracker to evaluate.")
+    parser.add_argument(
+        "--tracker",
+        default="MOSSE",
+        choices=list(TRACKER_REGISTRY),
+        help="Tracker to evaluate.",
+    )
+    parser.add_argument(
+        "--dataset-loader",
+        default="OTBDataset",
+        choices=list(DATASET_REGISTRY),
+        help="Dataset loader to use.",
+    )
     parser.add_argument("--dataset-root", metavar="DIR",
                         help="Path to dataset root directory.")
     parser.add_argument("--dataset-name", default="dataset",
                         help="Label for the dataset in reports.")
+    parser.add_argument(
+        "--split",
+        default="val",
+        help="Dataset split (GOT-10k: train|val|test; LaSOT: train|test|all).",
+    )
     parser.add_argument("--max-sequences", type=int, default=None,
                         metavar="N",
                         help="Evaluate only the first N sequences.")
@@ -190,6 +238,16 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Directory for output reports (default: results/).")
     parser.add_argument("--quiet", action="store_true",
                         help="Suppress per-sequence progress output.")
+    parser.add_argument(
+        "--tdp-watts",
+        type=float,
+        default=None,
+        metavar="W",
+        help=(
+            "Enable CPU energy estimation with this TDP (Watts). "
+            "E.g. 6.0 for Raspberry Pi 4, 10.0 for Jetson Nano, 15.0 for a laptop."
+        ),
+    )
     return parser
 
 

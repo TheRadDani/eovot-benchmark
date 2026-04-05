@@ -6,16 +6,16 @@ comparison table in Markdown and CSV formats.
 
 Usage::
 
-    # Quick sanity check (10 sequences)
+    # Quick sanity check (10 sequences, OTB-style dataset)
     python scripts/compare_trackers.py \\
         --trackers MOSSE KCF \\
         --dataset-root /data/OTB100 \\
         --dataset-name OTB100 \\
         --max-sequences 10
 
-    # Full OTB100 evaluation
+    # Full OTB100 evaluation with all classical trackers
     python scripts/compare_trackers.py \\
-        --trackers MOSSE KCF \\
+        --trackers MOSSE KCF CSRT MedianFlow MIL \\
         --dataset-root /data/OTB100 \\
         --dataset-name OTB100 \\
         --output-dir results/
@@ -26,6 +26,12 @@ Usage::
         --dataset-loader GOT10kDataset \\
         --dataset-root /data/GOT-10k \\
         --split val
+
+    # With CPU energy estimation (Raspberry Pi 4 TDP)
+    python scripts/compare_trackers.py \\
+        --trackers MOSSE KCF CSRT \\
+        --dataset-root /data/OTB100 \\
+        --tdp-watts 6.0
 """
 
 from __future__ import annotations
@@ -37,26 +43,42 @@ from pathlib import Path
 # Allow running as ``python scripts/compare_trackers.py`` from the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from eovot.benchmark.engine import BenchmarkConfig, BenchmarkEngine
+from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
+from eovot.datasets.lasot import LaSOTDataset
 from eovot.reporting.reporter import BenchmarkReporter
+from eovot.trackers.csrt import CSRTTracker
 from eovot.trackers.kcf import KCFTracker
+from eovot.trackers.median_flow import MedianFlowTracker
+from eovot.trackers.mil import MILTracker
 from eovot.trackers.mosse import MOSSETracker
 
 # ---------------------------------------------------------------------------
-# Registries — add new trackers / datasets here without touching the CLI code
+# Registries — add new trackers / datasets here without touching CLI code
 # ---------------------------------------------------------------------------
 
 TRACKER_REGISTRY = {
     "MOSSE": MOSSETracker,
     "KCF": KCFTracker,
+    "CSRT": CSRTTracker,
+    "MedianFlow": MedianFlowTracker,
+    "MIL": MILTracker,
 }
 
 DATASET_REGISTRY = {
     "OTBDataset": OTBDataset,
     "GOT10kDataset": GOT10kDataset,
+    "LaSOTDataset": LaSOTDataset,
 }
+
+
+def _build_dataset(loader_name: str, root: str, split: str, max_sequences):
+    """Instantiate the correct dataset loader, handling varying constructor signatures."""
+    cls = DATASET_REGISTRY[loader_name]
+    if loader_name in ("GOT10kDataset", "LaSOTDataset"):
+        return cls(root=root, split=split, max_sequences=max_sequences)
+    return cls(root=root)
 
 
 def main() -> None:
@@ -92,7 +114,7 @@ def main() -> None:
     parser.add_argument(
         "--split",
         default="val",
-        help="Dataset split (for GOT-10k: train | val | test).",
+        help="Dataset split (for GOT-10k: train | val | test; for LaSOT: train | test | all).",
     )
     parser.add_argument(
         "--max-sequences",
@@ -105,12 +127,21 @@ def main() -> None:
         default="results/",
         help="Directory where JSON, CSV, and Markdown reports are saved.",
     )
+    parser.add_argument(
+        "--tdp-watts",
+        type=float,
+        default=None,
+        metavar="W",
+        help=(
+            "Enable CPU energy estimation using this TDP value in Watts. "
+            "Example: 6.0 for Raspberry Pi 4, 10.0 for Jetson Nano, 15.0 for a laptop."
+        ),
+    )
     args = parser.parse_args()
 
     dataset_name = args.dataset_name or args.dataset_loader
     reporter = BenchmarkReporter(output_dir=args.output_dir)
-    config = BenchmarkConfig(max_sequences=args.max_sequences, verbose=True)
-    engine = BenchmarkEngine(config=config)
+    engine = BenchmarkEngine(verbose=True, tdp_watts=args.tdp_watts)
 
     all_results = []
 
@@ -120,28 +151,26 @@ def main() -> None:
         print(f"{'=' * 60}")
 
         tracker = TRACKER_REGISTRY[tracker_name]()
+        dataset = _build_dataset(
+            args.dataset_loader, args.dataset_root, args.split, args.max_sequences
+        )
 
-        dataset_cls = DATASET_REGISTRY[args.dataset_loader]
-        if args.dataset_loader == "GOT10kDataset":
-            dataset = dataset_cls(
-                root=args.dataset_root,
-                split=args.split,
-                max_sequences=args.max_sequences,
-            )
-        else:
-            dataset = dataset_cls(root=args.dataset_root)
+        result = engine.run(
+            tracker=tracker,
+            dataset=dataset,
+            dataset_name=dataset_name,
+            max_sequences=args.max_sequences,
+        )
+        result_dict = result.to_dict()
 
-        result = engine.run(tracker, dataset)
-        result["summary"].setdefault("dataset_name", dataset_name)
-
-        reporter.print_summary(result)
+        reporter.print_summary(result_dict)
 
         run_name = f"{tracker_name}-{dataset_name}"
-        saved = reporter.save_all(result, name=run_name)
+        saved = reporter.save_all(result_dict, name=run_name)
         for fmt, path in saved.items():
             print(f"  [{fmt.upper()}] saved → {path}")
 
-        all_results.append(result)
+        all_results.append(result_dict)
 
     # -----------------------------------------------------------------------
     # Comparison table (only meaningful with 2+ trackers)
