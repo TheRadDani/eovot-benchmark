@@ -39,4 +39,21 @@
 
 # debug information files
 *.dwo
-tests/__pycache__
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Test / coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build / dist
+*.egg-info/
+dist/
+build/
+
+# Results output (generated, not source)
+results/
