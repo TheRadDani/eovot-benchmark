@@ -1,0 +1,173 @@
+# Edge Deployment Profile Configuration
+# ======================================
+# Defines hardware constraints and scoring weights for common edge targets.
+#
+# Usage:
+#   python scripts/analyze_results.py results/ \
+#     --fps-target 15 --memory-budget 256 --w-accuracy 0.4 --w-speed 0.3 --w-memory 0.2 --w-energy 0.1
+#
+# Each "target" section documents the recommended CLI arguments for that device.
+# These are informational; use the CLI flags to apply them.
+
+experiment:
+  name: "edge_deployment_analysis"
+  description: >
+    Pareto-optimal analysis for selecting the best tracker under
+    edge hardware constraints. Compares classical and DL trackers
+    across accuracy, speed, memory, and energy dimensions.
+  output_dir: "results/edge_analysis"
+
+# -------------------------------------------------------------------------
+# Hardware Targets
+# -------------------------------------------------------------------------
+# Typical operating points for edge deployment scenarios.
+# Use these values as --fps-target / --memory-budget / --energy-budget CLI args.
+
+edge_targets:
+
+  raspberry_pi_4:
+    description: "Raspberry Pi 4 Model B (4 GB RAM, ARM Cortex-A72 @ 1.5 GHz)"
+    fps_target: 15.0          # Achievable for lightweight trackers (MOSSE, KCF)
+    memory_budget_mb: 256.0   # Conservative: leave ~3.75 GB for OS + application
+    energy_budget_mj: 50.0    # TDP ~6 W; 50 mJ/frame ≈ target at 30 FPS
+    tdp_watts: 6.0
+    notes: >
+      Classical trackers (MOSSE/KCF) are the realistic choice.
+      Deep learning models require quantisation or model compression.
+    cli_flags: "--fps-target 15 --memory-budget 256 --energy-budget 50"
+
+  jetson_nano:
+    description: "NVIDIA Jetson Nano Developer Kit (4 GB LPDDR4, 128-core Maxwell GPU)"
+    fps_target: 30.0          # 128-core Maxwell GPU enables real-time DL inference
+    memory_budget_mb: 512.0   # Shared CPU/GPU memory; leave headroom for OS
+    energy_budget_mj: 80.0    # TDP ~10 W; aggressive power management common
+    tdp_watts: 10.0
+    notes: >
+      DaSiamRPN and NanoTracker run at 30+ FPS with GPU acceleration.
+      Use ONNX runtime with TensorRT backend for best throughput.
+    cli_flags: "--fps-target 30 --memory-budget 512 --energy-budget 80"
+
+  jetson_xavier_nx:
+    description: "NVIDIA Jetson Xavier NX (8 GB LPDDR4x, 384-core Volta GPU + 2× DLA)"
+    fps_target: 60.0          # Volta GPU + DLA enables high-throughput inference
+    memory_budget_mb: 1024.0  # Larger budget for model + feature maps
+    energy_budget_mj: 150.0   # TDP ~15 W in 15W power mode
+    tdp_watts: 15.0
+    notes: >
+      Suitable for running multiple trackers simultaneously or
+      high-resolution inputs. INT8 quantisation recommended.
+    cli_flags: "--fps-target 60 --memory-budget 1024 --energy-budget 150"
+
+  laptop_cpu:
+    description: "Development laptop (Intel i7 / AMD Ryzen 7, ~16 GB RAM)"
+    fps_target: 60.0
+    memory_budget_mb: 2048.0
+    energy_budget_mj: 300.0   # TDP ~45 W; not battery-critical
+    tdp_watts: 45.0
+    notes: >
+      Baseline for development / ablation studies. Not a deployment target
+      but useful for profiling relative tracker performance.
+    cli_flags: "--fps-target 60 --memory-budget 2048 --energy-budget 300"
+
+  x86_server:
+    description: "Cloud / server CPU (Intel Xeon / AMD EPYC) — batch evaluation only"
+    fps_target: 120.0
+    memory_budget_mb: 8192.0
+    energy_budget_mj: 1000.0  # Energy less critical in server context
+    tdp_watts: 250.0
+    notes: >
+      Used for offline batch benchmarking. Edge score is less meaningful
+      here; use raw accuracy metrics and AUC for comparison.
+    cli_flags: "--fps-target 120 --memory-budget 8192 --energy-budget 1000"
+
+# -------------------------------------------------------------------------
+# Scoring Weight Presets
+# -------------------------------------------------------------------------
+# Different application domains call for different trade-offs.
+# Pass these as CLI arguments with --w-* flags.
+
+scoring_presets:
+
+  default:
+    description: "Balanced: good for general-purpose edge tracking"
+    w_accuracy: 0.40
+    w_speed: 0.30
+    w_memory: 0.20
+    w_energy: 0.10
+
+  accuracy_focused:
+    description: "High accuracy: surveillance, industrial inspection, medical imaging"
+    w_accuracy: 0.60
+    w_speed: 0.20
+    w_memory: 0.15
+    w_energy: 0.05
+
+  speed_focused:
+    description: "Real-time priority: robotics, drone guidance, autonomous vehicles"
+    w_accuracy: 0.25
+    w_speed: 0.50
+    w_memory: 0.15
+    w_energy: 0.10
+
+  memory_focused:
+    description: "Memory-constrained: microcontrollers, 256 MB class devices"
+    w_accuracy: 0.35
+    w_speed: 0.25
+    w_memory: 0.35
+    w_energy: 0.05
+
+  energy_focused:
+    description: "Battery-powered: IoT sensors, wearables, wildlife cameras"
+    w_accuracy: 0.30
+    w_speed: 0.20
+    w_memory: 0.20
+    w_energy: 0.30
+
+# -------------------------------------------------------------------------
+# Expected Operating Points (reference values from benchmarking)
+# -------------------------------------------------------------------------
+# Approximate values from evaluation on OTB-100 sequences.
+# These are NOT guarantees — actual performance depends on dataset and hardware.
+
+reference_operating_points:
+  MOSSE:
+    mean_iou: 0.52
+    fps_laptop: 450.0
+    fps_rpi4: 120.0
+    memory_mb: 15.0
+    notes: "Fastest tracker; low accuracy on fast-moving targets"
+
+  KCF:
+    mean_iou: 0.60
+    fps_laptop: 280.0
+    fps_rpi4: 55.0
+    memory_mb: 30.0
+    notes: "Good accuracy/speed trade-off; HOG features add memory cost"
+
+  MedianFlow:
+    mean_iou: 0.56
+    fps_laptop: 200.0
+    fps_rpi4: 40.0
+    memory_mb: 20.0
+    notes: "Explicit failure detection; best for slow, predictable motion"
+
+  CSRT:
+    mean_iou: 0.72
+    fps_laptop: 25.0
+    fps_rpi4: 5.0
+    memory_mb: 50.0
+    notes: "Highest accuracy classical tracker; too slow for Raspberry Pi"
+
+  NanoTracker:
+    mean_iou: 0.68
+    fps_laptop: 120.0
+    fps_jetson_nano: 35.0
+    memory_mb: 90.0
+    notes: "Good Pareto point for Jetson Nano; requires ONNX runtime"
+
+  DaSiamRPN:
+    mean_iou: 0.76
+    fps_laptop: 45.0
+    fps_jetson_nano: 28.0
+    memory_mb: 220.0
+    notes: "Best accuracy; requires ONNX runtime + DaSiamRPN model weights"
