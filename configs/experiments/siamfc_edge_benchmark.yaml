@@ -1,0 +1,102 @@
+# SiamFC vs. Classical Trackers — Edge Deployment Benchmark
+#
+# Compares the SiamFC deep tracker against the classical filter-based
+# trackers on the OTB-100 dataset, with hardware-aware profiling enabled.
+#
+# Goal: quantify the accuracy/efficiency trade-off for deployment on
+# edge devices (Raspberry Pi 4, Jetson Nano, laptop).
+#
+# Usage:
+#   # Full comparison (requires PyTorch for SiamFC):
+#   python scripts/compare_trackers.py \
+#       --config configs/experiments/siamfc_edge_benchmark.yaml
+#
+#   # Classical trackers only (no PyTorch dependency):
+#   python scripts/compare_trackers.py \
+#       --trackers MOSSE KCF CSRT MedianFlow \
+#       --dataset-root /data/OTB100 --dataset-name OTB100 \
+#       --tdp-watts 15.0 --output-dir results/classical/
+
+experiment:
+  name: "siamfc-vs-classical-otb100"
+  description: >
+    Accuracy/efficiency comparison of SiamFC (deep, PyTorch) against
+    classical correlation-filter trackers on OTB-100.
+    Profiles latency, memory, and CPU energy consumption to guide
+    edge deployment decisions.
+  output_dir: "results/siamfc_edge_benchmark/"
+  seed: 42
+
+dataset:
+  name: "OTB100"
+  loader: "OTBAttributeDataset"         # attribute-aware loader
+  root: "/data/OTB100"                  # ← set to your local OTB-100 path
+  max_sequences: null                   # null = all 100 sequences
+  # Optional: filter to a specific challenge attribute subset.
+  # Valid codes: IV, SV, OCC, DEF, MB, FM, IPR, OPR, OV, BC, LR
+  # attributes: [FM, OCC]              # e.g. fast-motion + occlusion sequences only
+
+trackers:
+  - name: "SiamFC"
+    class: "SiamFCTracker"
+    params:
+      device: "cpu"                     # "cuda:0" for GPU-equipped edge boards
+      template_size: 127
+      search_size: 255
+      response_upscale: 16
+      context_amount: 0.5
+      model_path: null                  # set to weights path for accuracy eval
+
+  - name: "MOSSE"
+    class: "MOSSETracker"
+    params:
+      learning_rate: 0.125
+      sigma: 2.0
+
+  - name: "KCF"
+    class: "KCFTracker"
+    params:
+      learning_rate: 0.075
+      lambda_: 1.0e-4
+      padding: 1.5
+      kernel_sigma: 0.5
+
+  - name: "CSRT"
+    class: "CSRTTracker"
+    params: {}
+
+  - name: "MedianFlow"
+    class: "MedianFlowTracker"
+    params: {}
+
+benchmark:
+  verbose: true
+  save_predictions: true
+
+profiling:
+  # Set tdp_watts to the CPU TDP of your target device for accurate
+  # energy estimates.  Leave null to disable energy profiling.
+  #   Raspberry Pi 4:  ~6 W
+  #   Jetson Nano:     ~10 W
+  #   Laptop CPU:      ~15–28 W
+  #   Desktop CPU:     ~65–125 W
+  tdp_watts: 15.0
+
+reporting:
+  formats: ["json", "csv", "markdown"]
+  print_summary: true
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Expected results (indicative; vary by hardware and tracker initialisation)
+# ──────────────────────────────────────────────────────────────────────────────
+#
+#  Tracker     | mIoU   | FPS (CPU) | Memory  | Energy/frame
+# -------------|--------|-----------|---------|-------------
+#  SiamFC*     | ~0.55  | ~15–40    | ~90 MB  | ~5–15 mJ
+#  MOSSE       | ~0.40  | ~400–600  | ~20 MB  | ~0.1 mJ
+#  KCF         | ~0.48  | ~150–300  | ~25 MB  | ~0.3 mJ
+#  CSRT        | ~0.58  | ~30–60    | ~35 MB  | ~1.5 mJ
+#  MedianFlow  | ~0.42  | ~80–200   | ~20 MB  | ~0.5 mJ
+#
+# * SiamFC accuracy requires pretrained weights (model_path set).
+#   With random weights, only latency/memory figures are valid.
