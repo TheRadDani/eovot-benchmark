@@ -6,5 +6,22 @@ from .accuracy import (
     AccuracyMetrics,
     MetricsEngine,
 )
+from .robustness import (
+    RobustnessMetrics,
+    compute_robustness,
+    normalized_precision_curve,
+    success_rate_at_threshold,
+)
 
-__all__ = ["iou", "center_distance", "AccuracyMetrics", "MetricsEngine"]
+__all__ = [
+    # Accuracy
+    "iou",
+    "center_distance",
+    "AccuracyMetrics",
+    "MetricsEngine",
+    # Robustness
+    "RobustnessMetrics",
+    "compute_robustness",
+    "normalized_precision_curve",
+    "success_rate_at_threshold",
+]

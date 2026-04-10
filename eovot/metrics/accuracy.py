@@ -79,12 +79,16 @@ class AccuracyMetrics:
     precision_auc: float
     """Normalised AUC of the Precision Curve (distance thresholds 0 → 50 px)."""
 
+    success_rate_50: float = 0.0
+    """Fraction of frames where IoU > 0.5 (Pascal VOC / COCO criterion)."""
+
     def __str__(self) -> str:
         return (
             f"AccuracyMetrics("
             f"mIoU={self.mean_iou:.4f}, "
             f"success_AUC={self.success_auc:.4f}, "
-            f"precision_AUC={self.precision_auc:.4f})"
+            f"precision_AUC={self.precision_auc:.4f}, "
+            f"SR@0.5={self.success_rate_50:.4f})"
         )
 
 
@@ -191,8 +195,11 @@ class MetricsEngine:
         thr_dist, pr = self.precision_curve(preds, gts)
         prec_auc = float(_trapz(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
 
+        sr50 = float((ious > 0.5).mean()) if len(ious) else 0.0
+
         return AccuracyMetrics(
             mean_iou=float(ious.mean()),
             success_auc=success_auc,
             precision_auc=prec_auc,
+            success_rate_50=sr50,
         )
