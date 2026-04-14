@@ -1,0 +1,80 @@
+# EOVOT Experiment: Deep-Learning vs. Classical Tracker Comparison
+#
+# Compares SiamFC-Lite (Siamese CNN) against KCF and MOSSE (correlation
+# filters) on OTB-100, producing an accuracy-vs-efficiency trade-off table.
+#
+# This experiment operationalises the central research question of EOVOT:
+#   "At what accuracy/FPS trade-off point does deep learning justify its
+#    extra compute cost on edge hardware?"
+#
+# ── Quick start ──────────────────────────────────────────────────────────────
+#
+# Run a single tracker (change 'name' below as needed):
+#   python scripts/run_benchmark.py \
+#     --config configs/experiments/deep_vs_classical.yaml
+#
+# Run all three and compare (produces results/deep-vs-classical/):
+#   python scripts/compare_trackers.py \
+#     --trackers SiamFCLite KCF MOSSE \
+#     --dataset-root /data/OTB100 \
+#     --dataset-name OTB100 \
+#     --tdp-watts 15.0 \
+#     --output-dir results/deep-vs-classical/
+#
+# ── Expected operating points (OTB-100, CPU inference, Intel Core i7) ───────
+#
+#   Tracker      mIoU   FPS     Memory  Notes
+#   ----------   -----  -----   ------  ---------------------------------
+#   SiamFC-Lite  0.60+  30-80   ~50 MB  Requires pre-trained backbone [*]
+#   KCF          0.55   200+    <5 MB   Best classical efficiency
+#   MOSSE        0.50   500+    <2 MB   Fastest; edge baseline
+#
+#   [*] Without pre-trained weights the tracker runs but mIoU will be ~0.
+#       Fine-tune on GOT-10k or load compatible SiamFC weights first.
+#
+# ── Edge-deployment guidance ─────────────────────────────────────────────────
+#
+#   Raspberry Pi 4  (tdp_watts: 6.0)   → MOSSE / KCF preferred
+#   Jetson Nano     (tdp_watts: 10.0)  → KCF on CPU; SiamFC-Lite on GPU
+#   Laptop CPU      (tdp_watts: 15.0)  → SiamFC-Lite comfortably runs at 30+ FPS
+#   Server GPU      (use GPUProfiler)  → SiamFC-Lite at 200+ FPS
+#
+# ── Reproducing the comparison table ─────────────────────────────────────────
+#
+# After running compare_trackers.py, generate the paper table with:
+#   python scripts/plot_results.py \
+#     --results-dir results/deep-vs-classical/ \
+#     --output-dir figures/deep-vs-classical/
+
+experiment:
+  name: "deep-vs-classical-otb100"
+  output_dir: "results/deep-vs-classical/"
+  seed: 42
+
+dataset:
+  name: "OTB100"
+  loader: "OTBDataset"
+  root: "/data/OTB100"           # ← update to your local OTB-100 path
+  # Use null for the full 100-sequence evaluation; 10 is a fast sanity check
+  max_sequences: 10
+
+tracker:
+  # Change to "KCF" or "MOSSE" to run classical baselines
+  name: "SiamFCLite"
+  params:
+    device: "cpu"                # set to "cuda" for GPU inference
+    template_size: 127           # must match backbone expectations
+    search_size: 255
+    context_amount: 0.5          # background padding fraction (SiamFC default)
+
+benchmark:
+  verbose: true
+  # CPU energy estimation — set to your device's TDP (Watts)
+  tdp_watts: 15.0                # laptop CPU; use 6.0 for Raspberry Pi 4
+
+reporting:
+  formats:
+    - json
+    - csv
+    - markdown
+  print_summary: true
