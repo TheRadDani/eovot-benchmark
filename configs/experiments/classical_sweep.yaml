@@ -1,0 +1,42 @@
+# classical_sweep.yaml
+#
+# Sweep all four classical trackers (MOSSE, KCF, CSRT, MedianFlow) on OTB-100
+# and produce a ranked comparison table.
+#
+# Usage:
+#   python scripts/run_sweep.py --config configs/experiments/classical_sweep.yaml
+#
+# Results:
+#   results/classical-otb-sweep.json   — full per-sequence breakdown
+#
+# Expected performance on OTB-100 (all 100 sequences):
+#   Tracker      mIoU    FPS     Mem (MB)  Notes
+#   -------      ----    ---     --------  -----
+#   CSRT         ~0.65   ~40     moderate  Highest accuracy
+#   KCF          ~0.55   ~250    low       Best accuracy/FPS trade-off
+#   MedianFlow   ~0.52   ~120    low       Good failure detection
+#   MOSSE        ~0.50   ~500    low       Fastest, baseline
+
+experiment:
+  name: classical-otb-sweep
+  output_dir: results/
+
+dataset:
+  name: OTB100
+  loader: OTBDataset
+  root: /data/OTB100   # ← update to your local OTB-100 path
+  # max_sequences: 10  # uncomment for a quick sanity-check run
+
+sweep:
+  trackers:
+    - MOSSE
+    - KCF
+    - CSRT
+    - MedianFlow
+  verbose: true
+
+hardware:
+  # Set auto_tdp: true to detect the host platform automatically.
+  # Or override with an explicit value for reproducible energy reports.
+  auto_tdp: true
+  # tdp_watts: 15.0   # uncomment to fix TDP (e.g. 6.0 for Raspberry Pi 4)
