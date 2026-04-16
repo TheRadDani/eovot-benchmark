@@ -9,6 +9,7 @@ import numpy as np
 
 from ..datasets.base import BaseDataset, Sequence
 from ..metrics.accuracy import MetricsEngine, center_distance
+from ..profiling.energy import EnergyProfiler, EnergyResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
 
@@ -21,6 +22,7 @@ class SequenceResult:
     predictions: Optional[np.ndarray] = None       # shape (N, 4) — predicted boxes
     ground_truths: Optional[np.ndarray] = None     # shape (N, 4) — GT boxes aligned to predictions
     center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
+    energy: Optional[EnergyResult] = None          # per-sequence energy estimate (when TDP set)
 
     @property
     def mean_iou(self) -> float:
@@ -95,67 +97,29 @@ class BenchmarkResult:
         return d
 
     def to_dict(self) -> Dict:
-        """Serialise to the dict format consumed by :class:`~eovot.reporting.reporter.BenchmarkReporter`.
+        """Serialize the full result to a dict compatible with
+        :class:`~eovot.reporting.reporter.BenchmarkReporter`.
 
-        Returns a dict with two keys:
+        Returns a nested dict with keys:
 
         * ``"summary"`` — aggregate scalar metrics (same as :meth:`summary`).
-        * ``"sequences"`` — list of per-sequence metric dicts.
+        * ``"sequences"`` — list of per-sequence metric dicts, each
+          optionally including ``"energy_j"`` and ``"energy_per_frame_mj"``
+          when energy profiling was enabled.
         """
-        sequences = []
-        for sr in self.sequence_results:
+        sequences: list = []
+        for r in self.sequence_results:
             entry: Dict = {
-                "sequence_name": sr.sequence_name,
-                "mean_iou": round(sr.mean_iou, 4),
-                "fps": round(sr.profiling.fps, 2),
-                "mean_latency_ms": round(sr.profiling.latency_mean_ms, 3),
-                "peak_memory_mb": round(sr.profiling.peak_memory_mb, 2),
-            }
-            if sr.energy is not None:
-                entry["energy_j"] = round(sr.energy.total_energy_j, 6)
-                entry["energy_per_frame_mj"] = round(sr.energy.energy_per_frame_mj, 4)
-            sequences.append(entry)
-        return {"summary": self.summary(), "sequences": sequences}
-
-    def to_dict(self) -> Dict:
-        """Serialise to the dict format consumed by :class:`~eovot.reporting.reporter.BenchmarkReporter`.
-
-        Returns a dict with two keys:
-
-        * ``"summary"`` — aggregate scalar metrics (same as :meth:`summary`).
-        * ``"sequences"`` — list of per-sequence metric dicts.
-        """
-        return {
-            "summary": self.summary(),
-            "sequences": [
-                {
-                    "sequence_name": sr.sequence_name,
-                    "mean_iou": round(sr.mean_iou, 4),
-                    "fps": round(sr.profiling.fps, 2),
-                    "mean_latency_ms": round(sr.profiling.latency_mean_ms, 3),
-                    "peak_memory_mb": round(sr.profiling.peak_memory_mb, 2),
-                }
-                for sr in self.sequence_results
-            ],
-        }
-
-    def to_dict(self) -> Dict:
-        """Serialize the full result to a dict compatible with :class:`~eovot.reporting.reporter.BenchmarkReporter`.
-
-        Returns a nested dict with keys ``"summary"`` (aggregate metrics)
-        and ``"sequences"`` (per-sequence breakdown), suitable for JSON
-        export and Markdown table generation.
-        """
-        sequences = [
-            {
                 "sequence_name": r.sequence_name,
                 "mean_iou": round(r.mean_iou, 4),
                 "fps": round(r.profiling.fps, 2),
                 "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
                 "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
             }
-            for r in self.sequence_results
-        ]
+            if r.energy is not None:
+                entry["energy_j"] = round(r.energy.total_energy_j, 6)
+                entry["energy_per_frame_mj"] = round(r.energy.energy_per_frame_mj, 4)
+            sequences.append(entry)
         return {"summary": self.summary(), "sequences": sequences}
 
     def __str__(self) -> str:
@@ -232,6 +196,10 @@ class BenchmarkEngine:
         if self._energy_profiler is not None:
             self._energy_profiler.reset()
 
+        # Reset tracker state between sequences so each sequence starts fresh.
+        if hasattr(tracker, "reset") and callable(tracker.reset):
+            tracker.reset()
+
         frames = list(seq)
         gt = seq.ground_truth
         preds: List = []
@@ -278,4 +246,5 @@ class BenchmarkEngine:
             predictions=preds_eval,
             ground_truths=gt_eval,
             center_distances=dists,
+            energy=energy,
         )

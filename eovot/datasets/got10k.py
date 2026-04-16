@@ -82,7 +82,7 @@ class GOT10kDataset(BaseDataset):
         names = self.list_sequences()
         if idx < 0 or idx >= len(names):
             raise IndexError(f"Sequence index {idx} out of range [0, {len(names)})")
-        return self.load_sequence(names[idx])
+        return self._load_sequence(names[idx])
 
     def list_sequences(self) -> List[str]:
         """Return the list of sequence names for this split.
@@ -161,8 +161,6 @@ class GOT10kDataset(BaseDataset):
     @property
     def name(self) -> str:
         return f"GOT-10k-{self.split}"
-
-        return Sequence(name=seq_name, frame_paths=frame_paths_str, ground_truth=gt_array)
 
     @staticmethod
     def _load_groundtruth(gt_file: Path) -> List[BBox]:
