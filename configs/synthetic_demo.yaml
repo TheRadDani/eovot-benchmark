@@ -1,0 +1,49 @@
+# EOVOT Synthetic Demo Configuration
+# ------------------------------------
+# Run a full benchmark on a synthetic dataset — no external data required.
+#
+# Usage:
+#   python scripts/run_benchmark.py --config configs/synthetic_demo.yaml
+#
+# This config is designed for:
+#   - CI smoke tests (fast, reproducible, zero-download)
+#   - Demo / tutorial runs (shows the complete pipeline end-to-end)
+#   - Regression checks after code changes
+#
+# Increase num_sequences and seq_len for more thorough evaluation.
+
+experiment:
+  name: "synthetic-mosse-demo"
+  output_dir: "results/synthetic/"
+  seed: 42
+
+dataset:
+  name: "Synthetic"
+  loader: "SyntheticDataset"
+
+  # Synthetic dataset parameters — all optional with sensible defaults.
+  num_sequences: 10          # number of independent sequences
+  seq_len: 100               # frames per sequence
+  frame_width: 320           # frame width  (pixels)
+  frame_height: 240          # frame height (pixels)
+  target_width: 40           # target width  (pixels)
+  target_height: 30          # target height (pixels)
+  damping: 0.85              # velocity decay  (0=noise-only, 1=constant-vel)
+  noise_std: 2.0             # per-frame velocity noise (pixels)
+  margin: 20                 # keep target this many px from frame edge
+  seed: 42                   # RNG seed for full reproducibility
+
+tracker:
+  name: "MOSSE"
+  params:
+    learning_rate: 0.125
+    sigma: 2.0
+
+benchmark:
+  verbose: true
+  save_predictions: false
+  # tdp_watts: 15.0          # uncomment to enable CPU energy estimation
+
+reporting:
+  formats: ["json", "csv"]
+  print_summary: true
