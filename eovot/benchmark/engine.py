@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -9,6 +10,7 @@ import numpy as np
 
 from ..datasets.base import BaseDataset, Sequence
 from ..metrics.accuracy import MetricsEngine, center_distance
+from ..profiling.energy import EnergyProfiler, EnergyResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
 
@@ -21,6 +23,7 @@ class SequenceResult:
     predictions: Optional[np.ndarray] = None       # shape (N, 4) — predicted boxes
     ground_truths: Optional[np.ndarray] = None     # shape (N, 4) — GT boxes aligned to predictions
     center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
+    energy: Optional[EnergyResult] = None          # CPU energy estimate for this sequence
 
     @property
     def mean_iou(self) -> float:
@@ -92,70 +95,36 @@ class BenchmarkResult:
         mcd = self.mean_center_distance
         if mcd is not None:
             d["mean_center_distance_px"] = round(mcd, 3)
+        te = self.total_energy_j
+        if te is not None:
+            d["total_energy_j"] = round(te, 6)
+        mef = self.mean_energy_per_frame_mj
+        if mef is not None:
+            d["mean_energy_per_frame_mj"] = round(mef, 4)
         return d
 
     def to_dict(self) -> Dict:
-        """Serialise to the dict format consumed by :class:`~eovot.reporting.reporter.BenchmarkReporter`.
-
-        Returns a dict with two keys:
-
-        * ``"summary"`` — aggregate scalar metrics (same as :meth:`summary`).
-        * ``"sequences"`` — list of per-sequence metric dicts.
-        """
-        sequences = []
-        for sr in self.sequence_results:
-            entry: Dict = {
-                "sequence_name": sr.sequence_name,
-                "mean_iou": round(sr.mean_iou, 4),
-                "fps": round(sr.profiling.fps, 2),
-                "mean_latency_ms": round(sr.profiling.latency_mean_ms, 3),
-                "peak_memory_mb": round(sr.profiling.peak_memory_mb, 2),
-            }
-            if sr.energy is not None:
-                entry["energy_j"] = round(sr.energy.total_energy_j, 6)
-                entry["energy_per_frame_mj"] = round(sr.energy.energy_per_frame_mj, 4)
-            sequences.append(entry)
-        return {"summary": self.summary(), "sequences": sequences}
-
-    def to_dict(self) -> Dict:
-        """Serialise to the dict format consumed by :class:`~eovot.reporting.reporter.BenchmarkReporter`.
-
-        Returns a dict with two keys:
-
-        * ``"summary"`` — aggregate scalar metrics (same as :meth:`summary`).
-        * ``"sequences"`` — list of per-sequence metric dicts.
-        """
-        return {
-            "summary": self.summary(),
-            "sequences": [
-                {
-                    "sequence_name": sr.sequence_name,
-                    "mean_iou": round(sr.mean_iou, 4),
-                    "fps": round(sr.profiling.fps, 2),
-                    "mean_latency_ms": round(sr.profiling.latency_mean_ms, 3),
-                    "peak_memory_mb": round(sr.profiling.peak_memory_mb, 2),
-                }
-                for sr in self.sequence_results
-            ],
-        }
-
-    def to_dict(self) -> Dict:
-        """Serialize the full result to a dict compatible with :class:`~eovot.reporting.reporter.BenchmarkReporter`.
+        """Serialize the full result to a dict for reporting and JSON export.
 
         Returns a nested dict with keys ``"summary"`` (aggregate metrics)
-        and ``"sequences"`` (per-sequence breakdown), suitable for JSON
-        export and Markdown table generation.
+        and ``"sequences"`` (per-sequence breakdown including energy when
+        available), suitable for :class:`~eovot.reporting.reporter.BenchmarkReporter`.
         """
-        sequences = [
-            {
+        sequences = []
+        for r in self.sequence_results:
+            entry: Dict = {
                 "sequence_name": r.sequence_name,
                 "mean_iou": round(r.mean_iou, 4),
                 "fps": round(r.profiling.fps, 2),
                 "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
                 "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
             }
-            for r in self.sequence_results
-        ]
+            if r.center_distances is not None and len(r.center_distances):
+                entry["mean_center_distance_px"] = round(float(r.center_distances.mean()), 3)
+            if r.energy is not None:
+                entry["energy_j"] = round(r.energy.total_energy_j, 6)
+                entry["energy_per_frame_mj"] = round(r.energy.energy_per_frame_mj, 4)
+            sequences.append(entry)
         return {"summary": self.summary(), "sequences": sequences}
 
     def __str__(self) -> str:
@@ -196,20 +165,43 @@ class BenchmarkEngine:
         dataset: BaseDataset,
         dataset_name: str = "unknown",
         max_sequences: Optional[int] = None,
+        save_dir: Optional[str] = None,
     ) -> BenchmarkResult:
-        """Evaluate *tracker* on every sequence in *dataset*."""
+        """Evaluate *tracker* on every sequence in *dataset*.
+
+        Args:
+            tracker: Tracker instance to evaluate.
+            dataset: Dataset to evaluate on.
+            dataset_name: Label used in reports and result objects.
+            max_sequences: If set, limit evaluation to this many sequences.
+            save_dir: If provided, write per-sequence prediction text files
+                under ``<save_dir>/<tracker_name>/<sequence_name>.txt``.
+                Each file contains one bounding box per line in
+                ``x y w h`` format (space-delimited, float values).
+                Compatible with OTB and GOT-10k evaluation protocols.
+        """
         result = BenchmarkResult(tracker_name=tracker.name, dataset_name=dataset_name)
         n = min(len(dataset), max_sequences) if max_sequences is not None else len(dataset)
 
         if self.verbose:
             energy_tag = f"  [energy TDP={self._energy_profiler.tdp_watts}W]" if self._energy_profiler else ""
-            print(f"\nEvaluating {tracker.name} on {dataset_name} ({n} sequences){energy_tag}")
+            save_tag = f"  [saving predictions → {save_dir}]" if save_dir else ""
+            print(f"\nEvaluating {tracker.name} on {dataset_name} ({n} sequences){energy_tag}{save_tag}")
             print("-" * 60)
 
         for idx in range(n):
             seq = dataset[idx]
             seq_result = self._run_sequence(tracker, seq)
             result.sequence_results.append(seq_result)
+
+            if save_dir is not None and seq_result.predictions is not None:
+                self._save_sequence_predictions(
+                    predictions=seq_result.predictions,
+                    tracker_name=tracker.name,
+                    sequence_name=seq_result.sequence_name,
+                    save_dir=save_dir,
+                )
+
             if self.verbose:
                 energy_str = ""
                 if seq_result.energy is not None:
@@ -278,4 +270,30 @@ class BenchmarkEngine:
             predictions=preds_eval,
             ground_truths=gt_eval,
             center_distances=dists,
+            energy=energy,
         )
+
+    @staticmethod
+    def _save_sequence_predictions(
+        predictions: np.ndarray,
+        tracker_name: str,
+        sequence_name: str,
+        save_dir: str,
+    ) -> str:
+        """Write predictions for one sequence to a text file.
+
+        Args:
+            predictions: Array of shape ``(N, 4)`` with bounding boxes in
+                ``(x, y, w, h)`` format.
+            tracker_name: Used as the top-level sub-directory name.
+            sequence_name: Used as the filename stem.
+            save_dir: Root output directory.
+
+        Returns:
+            Absolute path to the written file.
+        """
+        out_dir = os.path.join(save_dir, tracker_name)
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f"{sequence_name}.txt")
+        np.savetxt(out_path, predictions, fmt="%.4f", delimiter=" ")
+        return out_path
