@@ -47,8 +47,11 @@ from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
 from eovot.datasets.lasot import LaSOTDataset
+from eovot.profiling.device_profiles import get_profile, list_profiles
 from eovot.reporting.reporter import BenchmarkReporter
+from eovot.trackers.csrt import CSRTTracker
 from eovot.trackers.kcf import KCFTracker
+from eovot.trackers.median_flow import MedianFlowTracker
 from eovot.trackers.mosse import MOSSETracker
 
 # ---------------------------------------------------------------------------
@@ -58,6 +61,8 @@ from eovot.trackers.mosse import MOSSETracker
 TRACKER_REGISTRY = {
     "MOSSE": MOSSETracker,
     "KCF": KCFTracker,
+    "CSRT": CSRTTracker,
+    "MedianFlow": MedianFlowTracker,
 }
 
 DATASET_REGISTRY = {
@@ -130,14 +135,51 @@ def main() -> None:
         metavar="W",
         help=(
             "Enable CPU energy estimation using this TDP value in Watts. "
-            "Example: 6.0 for Raspberry Pi 4, 15.0 for a laptop CPU."
+            "Example: 6.0 for Raspberry Pi 4, 15.0 for a laptop CPU. "
+            "Ignored if --device-profile is set."
         ),
+    )
+    profile_choices = [name for name, _ in list_profiles()]
+    parser.add_argument(
+        "--device-profile",
+        default=None,
+        metavar="PROFILE",
+        choices=profile_choices,
+        help=(
+            "Named hardware profile — sets TDP automatically. "
+            f"Available: {', '.join(profile_choices)}. "
+            "Takes precedence over --tdp-watts."
+        ),
+    )
+    parser.add_argument(
+        "--list-devices",
+        action="store_true",
+        help="Print all available device profiles and exit.",
     )
     args = parser.parse_args()
 
+    if args.list_devices:
+        print("\nAvailable EOVOT device profiles:\n")
+        print(f"  {'Name':<22} {'Class':<14} {'TDP (W)':>7}  Description")
+        print("  " + "-" * 70)
+        for name, profile in list_profiles():
+            print(
+                f"  {name:<22} {profile.device_class:<14} {profile.tdp_watts:>7.1f}  "
+                f"{profile.description}"
+            )
+        print()
+        sys.exit(0)
+
+    # Resolve TDP: device profile takes precedence over --tdp-watts
+    tdp: float | None = args.tdp_watts
+    if args.device_profile:
+        profile = get_profile(args.device_profile)
+        tdp = profile.tdp_watts
+        print(f"\n[device] Using profile '{profile.display_name}' — TDP={tdp} W")
+
     dataset_name = args.dataset_name or args.dataset_loader
     reporter = BenchmarkReporter(output_dir=args.output_dir)
-    engine = BenchmarkEngine(verbose=True)
+    engine = BenchmarkEngine(verbose=True, tdp_watts=tdp)
 
     all_results = []
 
@@ -150,16 +192,6 @@ def main() -> None:
         dataset = _build_dataset(
             args.dataset_loader, args.dataset_root, args.split, args.max_sequences
         )
-
-        dataset_cls = DATASET_REGISTRY[args.dataset_loader]
-        if args.dataset_loader == "GOT10kDataset":
-            dataset = dataset_cls(
-                root=args.dataset_root,
-                split=args.split,
-                max_sequences=args.max_sequences,
-            )
-        else:
-            dataset = dataset_cls(root=args.dataset_root)
 
         result = engine.run(
             tracker=tracker,
