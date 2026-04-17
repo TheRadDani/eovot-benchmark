@@ -23,7 +23,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 # Ensure the repo root is importable when run directly
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -34,9 +34,9 @@ from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
 from eovot.datasets.lasot import LaSOTDataset
+from eovot.experiments.prediction_writer import PredictionWriter
 from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.mosse import MOSSETracker
-from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.csrt import CSRTTracker
 from eovot.trackers.median_flow import MedianFlowTracker
 
@@ -98,6 +98,8 @@ def _config_from_args(args: argparse.Namespace) -> Dict:
         "reporting": {
             "formats": ["json"],
             "print_summary": True,
+            "save_predictions": getattr(args, "save_predictions", None),
+            "prediction_format": getattr(args, "prediction_format", "otb"),
         },
     }
 
@@ -144,18 +146,25 @@ def run_from_config(cfg: Dict) -> None:
         tdp_watts=bm_cfg.get("tdp_watts"),
     )
 
-    result = engine.run(
-        tracker=tracker,
-        dataset=dataset,
-        dataset_name=ds_cfg.get("name", "unknown"),
-        max_sequences=ds_cfg.get("max_sequences"),
-    )
-
     # --- Reporting ---
     report_cfg = cfg.get("reporting", {})
     output_dir = cfg["experiment"].get("output_dir", "results/")
     exp_name = cfg["experiment"].get("name", "run")
     os.makedirs(output_dir, exist_ok=True)
+
+    # Resolve prediction save directory (CLI flag or config key)
+    save_preds_dir: Optional[str] = None
+    if report_cfg.get("save_predictions"):
+        val = report_cfg["save_predictions"]
+        save_preds_dir = val if isinstance(val, str) else os.path.join(output_dir, "predictions")
+
+    result = engine.run(
+        tracker=tracker,
+        dataset=dataset,
+        dataset_name=ds_cfg.get("name", "unknown"),
+        max_sequences=ds_cfg.get("max_sequences"),
+        save_dir=save_preds_dir,
+    )
 
     summary = result.summary()
 
@@ -171,7 +180,7 @@ def run_from_config(cfg: Dict) -> None:
     if "json" in formats:
         out_path = os.path.join(output_dir, f"{exp_name}.json")
         with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2)
+            json.dump(result.to_dict(), f, indent=2)
         print(f"\nResults saved to {out_path}")
 
     if "csv" in formats:
@@ -182,6 +191,12 @@ def run_from_config(cfg: Dict) -> None:
             writer.writeheader()
             writer.writerow(summary)
         print(f"Results saved to {out_path}")
+
+    if save_preds_dir:
+        pred_fmt = report_cfg.get("prediction_format", "otb")
+        pw = PredictionWriter(save_preds_dir, fmt=pred_fmt)
+        written = pw.write_result(result)
+        print(f"\nPredictions saved: {len(written)} sequence file(s) in {save_preds_dir}")
 
 
 # ------------------------------------------------------------------ #
@@ -218,6 +233,29 @@ def _build_parser() -> argparse.ArgumentParser:
                             "Enable CPU energy estimation with this TDP (Watts). "
                             "E.g. 6.0 for Raspberry Pi 4, 15.0 for a laptop."
                         ))
+    parser.add_argument(
+        "--save-predictions",
+        nargs="?",
+        const=True,
+        default=None,
+        metavar="DIR",
+        help=(
+            "Save per-sequence prediction text files. "
+            "Optionally provide a directory path; defaults to <output-dir>/predictions. "
+            "Files are written as <DIR>/<tracker>/<sequence>.txt."
+        ),
+    )
+    parser.add_argument(
+        "--prediction-format",
+        default="otb",
+        choices=["otb", "got10k", "vot"],
+        help=(
+            "Format for saved prediction files: "
+            "'otb' (space-delimited, default), "
+            "'got10k' (comma-delimited), "
+            "'vot' (comma-delimited)."
+        ),
+    )
     return parser
 
 
