@@ -1,0 +1,63 @@
+# Edge Deployment Frame-Skip Experiment
+# ======================================
+# Evaluates a tracker under increasing temporal sub-sampling rates to
+# characterise the Accuracy–Efficiency Tradeoff (AET) on edge hardware.
+#
+# Purpose
+# -------
+# On constrained edge devices (Raspberry Pi 4, Jetson Nano, MCUs) it may
+# not be possible to invoke the full tracker at camera frame-rate.  This
+# experiment sweeps skip_rate ∈ {1, 2, 4, 8} to build an AET curve showing
+# how accuracy degrades as the tracker is called less frequently.
+#
+# Usage
+# -----
+#   python scripts/run_benchmark.py --config configs/experiments/edge_frame_skip.yaml
+#
+# The experiment runs each skip_rate in sequence and writes a combined
+# JSON report and an AET curve summary table to the output directory.
+#
+# Hardware guidance (TDP)
+# ------
+#   Raspberry Pi 4:  tdp_watts: 6.0
+#   Jetson Nano:     tdp_watts: 10.0
+#   Laptop CPU:      tdp_watts: 15.0
+#   Desktop CPU:     tdp_watts: 65.0
+
+experiment:
+  name: edge_frame_skip
+  output_dir: results/edge_frame_skip/
+  seed: 42
+
+dataset:
+  name: OTB100
+  loader: OTBDataset
+  root: /data/OTB100          # ← update to your local dataset path
+  max_sequences: 20           # use null to evaluate all sequences
+
+# Base tracker to wrap with FrameSkipWrapper.
+# Any registered tracker works: MOSSE, KCF, CSRT, MedianFlow
+tracker:
+  name: KCF
+  params:
+    learning_rate: 0.075
+    lambda_: 1.0e-4
+    padding: 1.5
+
+# Frame-skip rates to sweep.
+# The benchmark engine will be run once per skip_rate, wrapping the base
+# tracker with FrameSkipWrapper(skip_rate=k) automatically.
+frame_skip:
+  skip_rates: [1, 2, 4, 8]
+
+benchmark:
+  verbose: true
+  # Set to your device's CPU TDP in Watts for energy estimates, or null to
+  # disable energy profiling.
+  tdp_watts: 15.0
+
+reporting:
+  formats: [json, csv]
+  print_summary: true
+  # Set to true to also export the AET curve summary as a Markdown table.
+  aet_summary: true
