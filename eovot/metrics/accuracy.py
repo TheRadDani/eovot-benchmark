@@ -9,6 +9,9 @@ LaSOT benchmarks:
 - **Precision Curve** — fraction of frames whose predicted centre is
   within a pixel-distance threshold of the ground-truth centre,
   swept from 0 to 50 px; AUC at 20 px is the canonical scalar.
+- **Normalized Precision Curve** — precision curve with distances
+  normalized by the GT box diagonal, making it resolution-agnostic.
+  Used by GOT-10k and LaSOT evaluation protocols.
 - **AccuracyMetrics** dataclass that bundles all scalars together.
 """
 
@@ -66,6 +69,27 @@ def center_distance(pred: BBox, gt: BBox) -> float:
     return float(np.sqrt(dx * dx + dy * dy))
 
 
+def normalized_center_distance(pred: BBox, gt: BBox) -> float:
+    """Centre-distance normalized by the GT box diagonal length.
+
+    Dividing by the diagonal makes the metric independent of image resolution
+    and object size, enabling fair cross-dataset comparisons.
+
+    Args:
+        pred: Predicted box ``(x, y, w, h)``.
+        gt:   Ground-truth box ``(x, y, w, h)``.
+
+    Returns:
+        Normalized distance in ``[0, ∞)``.  Returns 0 when the GT box is
+        degenerate (zero area).
+    """
+    _, _, gw, gh = gt
+    diagonal = float(np.sqrt(gw * gw + gh * gh))
+    if diagonal <= 0:
+        return 0.0
+    return center_distance(pred, gt) / diagonal
+
+
 @dataclass
 class AccuracyMetrics:
     """Scalar accuracy summary for a tracker on a dataset or sequence."""
@@ -79,13 +103,19 @@ class AccuracyMetrics:
     precision_auc: float
     """Normalised AUC of the Precision Curve (distance thresholds 0 → 50 px)."""
 
+    norm_precision_auc: Optional[float] = None
+    """AUC of the Normalized Precision Curve (thresholds 0 → 0.5 × GT diagonal).
+    Resolution-agnostic; used by GOT-10k and LaSOT protocols."""
+
     def __str__(self) -> str:
-        return (
-            f"AccuracyMetrics("
+        parts = (
             f"mIoU={self.mean_iou:.4f}, "
             f"success_AUC={self.success_auc:.4f}, "
-            f"precision_AUC={self.precision_auc:.4f})"
+            f"precision_AUC={self.precision_auc:.4f}"
         )
+        if self.norm_precision_auc is not None:
+            parts += f", norm_precision_AUC={self.norm_precision_auc:.4f}"
+        return f"AccuracyMetrics({parts})"
 
 
 class MetricsEngine:
@@ -162,12 +192,48 @@ class MetricsEngine:
         rates = np.array([(dists < t).mean() for t in thresholds])
         return thresholds, rates
 
+    def normalized_precision_curve(
+        self,
+        preds: np.ndarray,
+        gts: np.ndarray,
+        thresholds: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Normalized precision curve: fraction of frames with normalized centre-dist < threshold.
+
+        Distances are divided by the GT box diagonal, making the metric
+        independent of image resolution and object scale.  Standard threshold
+        range is 0 → 0.5 (i.e. half a GT-box diagonal), following the
+        GOT-10k and LaSOT evaluation protocols.
+
+        Args:
+            preds:      ``(N, 4)`` predicted boxes.
+            gts:        ``(N, 4)`` ground-truth boxes.
+            thresholds: Normalized distance thresholds (default: 0 … 0.5,
+                        101 points).
+
+        Returns:
+            ``(thresholds, precision_rates)`` — both shape ``(T,)``.
+        """
+        if thresholds is None:
+            thresholds = np.linspace(0.0, 0.5, 101)
+        n = min(len(preds), len(gts))
+        norm_dists = np.array(
+            [
+                normalized_center_distance(
+                    tuple(preds[i]), tuple(gts[i])  # type: ignore[arg-type]
+                )
+                for i in range(n)
+            ]
+        )
+        rates = np.array([(norm_dists < t).mean() for t in thresholds])
+        return thresholds, rates
+
     def compute_all(
         self,
         preds: np.ndarray,
         gts: np.ndarray,
     ) -> AccuracyMetrics:
-        """Compute mean IoU, success AUC, and precision AUC in one call.
+        """Compute mean IoU, success AUC, precision AUC, and normalized precision AUC.
 
         Args:
             preds: ``(N, 4)`` predicted boxes.
@@ -178,21 +244,20 @@ class MetricsEngine:
         """
         ious = self.batch_iou(preds, gts)
 
-        # np.trapezoid was introduced in NumPy 2.0; np.trapz was removed in 2.0.
-        _trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz  # type: ignore[attr-defined]
+        _trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz  # type: ignore[attr-defined]
 
         thr_iou, sr = self.success_curve(ious)
-        try:
-            _trapz = np.trapezoid  # numpy ≥ 2.0
-        except AttributeError:
-            _trapz = np.trapz  # numpy < 2.0
         success_auc = float(_trapz(sr, thr_iou))
 
         thr_dist, pr = self.precision_curve(preds, gts)
         prec_auc = float(_trapz(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
 
+        thr_norm, npr = self.normalized_precision_curve(preds, gts)
+        norm_prec_auc = float(_trapz(npr, thr_norm) / thr_norm[-1]) if thr_norm[-1] > 0 else 0.0
+
         return AccuracyMetrics(
             mean_iou=float(ious.mean()),
             success_auc=success_auc,
             precision_auc=prec_auc,
+            norm_precision_auc=norm_prec_auc,
         )
