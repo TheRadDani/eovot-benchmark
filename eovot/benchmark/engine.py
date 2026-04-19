@@ -9,6 +9,7 @@ import numpy as np
 
 from ..datasets.base import BaseDataset, Sequence
 from ..metrics.accuracy import MetricsEngine, center_distance
+from ..profiling.energy import EnergyProfiler, EnergyResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
 
@@ -18,6 +19,7 @@ class SequenceResult:
     sequence_name: str
     ious: np.ndarray
     profiling: ProfilingResult
+    energy: Optional[EnergyResult] = None          # CPU energy estimate; None if not profiled
     predictions: Optional[np.ndarray] = None       # shape (N, 4) — predicted boxes
     ground_truths: Optional[np.ndarray] = None     # shape (N, 4) — GT boxes aligned to predictions
     center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
@@ -117,46 +119,6 @@ class BenchmarkResult:
             sequences.append(entry)
         return {"summary": self.summary(), "sequences": sequences}
 
-    def to_dict(self) -> Dict:
-        """Serialise to the dict format consumed by :class:`~eovot.reporting.reporter.BenchmarkReporter`.
-
-        Returns a dict with two keys:
-
-        * ``"summary"`` — aggregate scalar metrics (same as :meth:`summary`).
-        * ``"sequences"`` — list of per-sequence metric dicts.
-        """
-        return {
-            "summary": self.summary(),
-            "sequences": [
-                {
-                    "sequence_name": sr.sequence_name,
-                    "mean_iou": round(sr.mean_iou, 4),
-                    "fps": round(sr.profiling.fps, 2),
-                    "mean_latency_ms": round(sr.profiling.latency_mean_ms, 3),
-                    "peak_memory_mb": round(sr.profiling.peak_memory_mb, 2),
-                }
-                for sr in self.sequence_results
-            ],
-        }
-
-    def to_dict(self) -> Dict:
-        """Serialize the full result to a dict compatible with :class:`~eovot.reporting.reporter.BenchmarkReporter`.
-
-        Returns a nested dict with keys ``"summary"`` (aggregate metrics)
-        and ``"sequences"`` (per-sequence breakdown), suitable for JSON
-        export and Markdown table generation.
-        """
-        sequences = [
-            {
-                "sequence_name": r.sequence_name,
-                "mean_iou": round(r.mean_iou, 4),
-                "fps": round(r.profiling.fps, 2),
-                "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
-                "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
-            }
-            for r in self.sequence_results
-        ]
-        return {"summary": self.summary(), "sequences": sequences}
 
     def __str__(self) -> str:
         s = self.summary()
@@ -275,6 +237,7 @@ class BenchmarkEngine:
             sequence_name=seq.name,
             ious=ious,
             profiling=self._profiler.summary(tracker.name),
+            energy=energy,
             predictions=preds_eval,
             ground_truths=gt_eval,
             center_distances=dists,
