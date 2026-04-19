@@ -162,8 +162,6 @@ class GOT10kDataset(BaseDataset):
     def name(self) -> str:
         return f"GOT-10k-{self.split}"
 
-        return Sequence(name=seq_name, frame_paths=frame_paths_str, ground_truth=gt_array)
-
     @staticmethod
     def _load_groundtruth(gt_file: Path) -> List[BBox]:
         """Parse ``groundtruth.txt`` into a list of ``(x, y, w, h)`` tuples.
