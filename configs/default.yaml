@@ -23,6 +23,11 @@ tracker:
 benchmark:
   verbose: true                       # Print per-sequence progress
   save_predictions: false             # Save per-frame bbox predictions
+  # device_profile: null              # Named edge device preset (sets tdp_watts automatically).
+  #                                   # Options: raspberry_pi_4 | jetson_nano | jetson_xavier_nx |
+  #                                   #          coral_dev_board | intel_nuc_i5 | laptop_cpu |
+  #                                   #          desktop_gpu_workstation
+  # tdp_watts: null                   # Manual TDP override (ignored when device_profile is set).
 
 reporting:
   formats: ["json", "csv"]            # Output report formats

@@ -209,3 +209,68 @@ class TestBenchmarkEngine:
         result = self.engine.run(tracker, self.dataset, dataset_name="Synthetic")
         assert result.mean_center_distance is not None
         assert result.mean_center_distance > 0.0
+
+    def test_energy_none_when_not_enabled(self):
+        """When tdp_watts is not set, SequenceResult.energy must be None."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        assert result.total_energy_j is None
+        assert result.mean_energy_per_frame_mj is None
+        for sr in result.sequence_results:
+            assert sr.energy is None
+
+    def test_summary_no_energy_keys_when_disabled(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        s = result.summary()
+        assert "total_energy_j" not in s
+        assert "mean_energy_per_frame_mj" not in s
+
+    def test_to_dict_no_energy_keys_when_disabled(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        d = result.to_dict()
+        for seq_entry in d["sequences"]:
+            assert "energy_j" not in seq_entry
+
+
+class TestBenchmarkEngineWithEnergy:
+    """Tests for energy profiling when tdp_watts is provided."""
+
+    def setup_method(self):
+        self.engine = BenchmarkEngine(verbose=False, tdp_watts=15.0)
+        self.tracker = ConstantTracker(FIXED_BOX)
+        self.dataset = SyntheticDataset(n_sequences=2)
+
+    def test_energy_result_populated(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        for sr in result.sequence_results:
+            assert sr.energy is not None, "energy must be set when tdp_watts is configured"
+
+    def test_total_energy_is_positive(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        e = result.total_energy_j
+        assert e is not None
+        assert e >= 0.0
+
+    def test_mean_energy_per_frame_is_positive(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        e = result.mean_energy_per_frame_mj
+        assert e is not None
+        assert e >= 0.0
+
+    def test_summary_includes_energy_keys(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        s = result.summary()
+        assert "total_energy_j" in s
+        assert "mean_energy_per_frame_mj" in s
+
+    def test_to_dict_includes_energy_per_sequence(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        d = result.to_dict()
+        for seq_entry in d["sequences"]:
+            assert "energy_j" in seq_entry
+            assert "energy_per_frame_mj" in seq_entry
+
+    def test_energy_tdp_matches_config(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        for sr in result.sequence_results:
+            assert sr.energy is not None
+            assert sr.energy.tdp_watts == pytest.approx(15.0)
