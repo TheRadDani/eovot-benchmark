@@ -1,0 +1,14 @@
+# Hardware profile: x86 Laptop CPU
+# ----------------------------------
+# Represents a typical 28 W configurable TDP mobile processor.
+# Adjust tdp_watts to match your specific CPU's TDP from its datasheet.
+#
+# Example:
+#   from eovot.profiling.hardware_profiles import HardwareProfile
+#   profile = HardwareProfile.from_yaml("configs/hardware/x86_laptop.yaml")
+
+name: "x86 Laptop CPU"
+tdp_watts: 28.0
+memory_limit_mb: 16384.0
+target_fps: 30.0
+description: "Typical mobile x86-64 processor (e.g. Intel Core i7 / AMD Ryzen 7)"
