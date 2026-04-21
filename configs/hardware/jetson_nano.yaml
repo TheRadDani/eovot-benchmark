@@ -1,0 +1,14 @@
+# Hardware profile: NVIDIA Jetson Nano
+# -------------------------------------
+# Targeting the 10W power mode.  For 5W mode, set tdp_watts: 5.0
+# and lower target_fps to 10.0.
+#
+# Example:
+#   from eovot.profiling.hardware_profiles import HardwareProfile
+#   profile = HardwareProfile.from_yaml("configs/hardware/jetson_nano.yaml")
+
+name: "NVIDIA Jetson Nano"
+tdp_watts: 10.0
+memory_limit_mb: 4096.0
+target_fps: 20.0
+description: "Quad-core Cortex-A57 + 128-core Maxwell GPU, 4 GB LPDDR4"

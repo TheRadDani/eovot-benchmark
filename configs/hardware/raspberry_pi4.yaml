@@ -1,0 +1,13 @@
+# Hardware profile: Raspberry Pi 4
+# ---------------------------------
+# Use with EdgeScorer to evaluate tracker deployability on RPi 4.
+#
+# Example:
+#   from eovot.profiling.hardware_profiles import HardwareProfile
+#   profile = HardwareProfile.from_yaml("configs/hardware/raspberry_pi4.yaml")
+
+name: "Raspberry Pi 4"
+tdp_watts: 6.0
+memory_limit_mb: 4096.0
+target_fps: 10.0
+description: "BCM2711 quad-core Cortex-A72 @ 1.8 GHz, 4 GB LPDDR4-3200"

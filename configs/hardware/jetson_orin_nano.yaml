@@ -1,0 +1,14 @@
+# Hardware profile: NVIDIA Jetson Orin Nano
+# ------------------------------------------
+# 15W power mode (default).  The Orin Nano also supports 7W mode;
+# for that, set tdp_watts: 7.0 and target_fps: 15.0.
+#
+# Example:
+#   from eovot.profiling.hardware_profiles import HardwareProfile
+#   profile = HardwareProfile.from_yaml("configs/hardware/jetson_orin_nano.yaml")
+
+name: "NVIDIA Jetson Orin Nano"
+tdp_watts: 15.0
+memory_limit_mb: 8192.0
+target_fps: 30.0
+description: "6-core Cortex-A78AE + 1024-core Ampere GPU, 8 GB LPDDR5"
