@@ -34,11 +34,11 @@ from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
 from eovot.datasets.lasot import LaSOTDataset
-from eovot.trackers.kcf import KCFTracker
-from eovot.trackers.mosse import MOSSETracker
-from eovot.trackers.kcf import KCFTracker
+from eovot.datasets.synthetic import SyntheticDataset
 from eovot.trackers.csrt import CSRTTracker
+from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.median_flow import MedianFlowTracker
+from eovot.trackers.mosse import MOSSETracker
 
 
 # ------------------------------------------------------------------ #
@@ -61,6 +61,7 @@ DATASET_REGISTRY: Dict[str, Any] = {
     "OTBDataset": OTBDataset,
     "GOT10kDataset": GOT10kDataset,
     "LaSOTDataset": LaSOTDataset,
+    "SyntheticDataset": SyntheticDataset,
 }
 
 
@@ -120,6 +121,15 @@ def run_from_config(cfg: Dict) -> None:
             ds_cfg["root"],
             split=ds_cfg.get("split", "val"),
             max_sequences=ds_cfg.get("max_sequences"),
+        )
+    elif loader_name == "SyntheticDataset":
+        syn_params = ds_cfg.get("params", {})
+        dataset = loader_cls(
+            n_sequences=syn_params.get("n_sequences", 5),
+            n_frames=syn_params.get("n_frames", 50),
+            motion=syn_params.get("motion", "linear"),
+            speed=syn_params.get("speed", 3.0),
+            seed=syn_params.get("seed", 42),
         )
     else:
         dataset = loader_cls(ds_cfg["root"])
