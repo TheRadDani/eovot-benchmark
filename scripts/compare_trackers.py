@@ -48,7 +48,9 @@ from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
 from eovot.datasets.lasot import LaSOTDataset
 from eovot.reporting.reporter import BenchmarkReporter
+from eovot.trackers.csrt import CSRTTracker
 from eovot.trackers.kcf import KCFTracker
+from eovot.trackers.median_flow import MedianFlowTracker
 from eovot.trackers.mosse import MOSSETracker
 
 # ---------------------------------------------------------------------------
@@ -58,6 +60,8 @@ from eovot.trackers.mosse import MOSSETracker
 TRACKER_REGISTRY = {
     "MOSSE": MOSSETracker,
     "KCF": KCFTracker,
+    "CSRT": CSRTTracker,
+    "MedianFlow": MedianFlowTracker,
 }
 
 DATASET_REGISTRY = {
