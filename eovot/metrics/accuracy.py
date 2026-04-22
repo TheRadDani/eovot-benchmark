@@ -79,12 +79,16 @@ class AccuracyMetrics:
     precision_auc: float
     """Normalised AUC of the Precision Curve (distance thresholds 0 → 50 px)."""
 
+    precision_score_20px: float
+    """Precision score at the canonical 20-pixel centre-distance threshold (OTB standard)."""
+
     def __str__(self) -> str:
         return (
             f"AccuracyMetrics("
             f"mIoU={self.mean_iou:.4f}, "
             f"success_AUC={self.success_auc:.4f}, "
-            f"precision_AUC={self.precision_auc:.4f})"
+            f"precision_AUC={self.precision_auc:.4f}, "
+            f"prec@20px={self.precision_score_20px:.4f})"
         )
 
 
@@ -167,7 +171,7 @@ class MetricsEngine:
         preds: np.ndarray,
         gts: np.ndarray,
     ) -> AccuracyMetrics:
-        """Compute mean IoU, success AUC, and precision AUC in one call.
+        """Compute mean IoU, success AUC, precision AUC, and precision@20px in one call.
 
         Args:
             preds: ``(N, 4)`` predicted boxes.
@@ -178,21 +182,27 @@ class MetricsEngine:
         """
         ious = self.batch_iou(preds, gts)
 
-        # np.trapezoid was introduced in NumPy 2.0; np.trapz was removed in 2.0.
-        _trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz  # type: ignore[attr-defined]
-
-        thr_iou, sr = self.success_curve(ious)
         try:
             _trapz = np.trapezoid  # numpy ≥ 2.0
         except AttributeError:
-            _trapz = np.trapz  # numpy < 2.0
+            _trapz = np.trapz  # numpy < 2.0  # type: ignore[attr-defined]
+
+        thr_iou, sr = self.success_curve(ious)
         success_auc = float(_trapz(sr, thr_iou))
 
         thr_dist, pr = self.precision_curve(preds, gts)
         prec_auc = float(_trapz(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
 
+        # Precision score at the canonical OTB 20-pixel threshold.
+        n = min(len(preds), len(gts))
+        dists = np.array(
+            [center_distance(tuple(preds[i]), tuple(gts[i])) for i in range(n)]  # type: ignore[arg-type]
+        )
+        prec_20px = float((dists < 20.0).mean()) if n > 0 else 0.0
+
         return AccuracyMetrics(
             mean_iou=float(ious.mean()),
             success_auc=success_auc,
             precision_auc=prec_auc,
+            precision_score_20px=prec_20px,
         )
