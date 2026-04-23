@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from eovot.metrics.accuracy import MetricsEngine, iou, center_distance
+from eovot.metrics.accuracy import MetricsEngine, iou, center_distance, normalized_center_distance
 
 
 class TestIoU:
@@ -51,6 +51,29 @@ class TestCenterDistance:
         a = (10.0, 10.0, 20.0, 20.0)
         b = (13.0, 14.0, 20.0, 20.0)
         assert center_distance(a, b) == pytest.approx(5.0)
+
+
+class TestNormalizedCenterDistance:
+    def test_same_box_is_zero(self):
+        box = (0.0, 0.0, 30.0, 40.0)
+        assert normalized_center_distance(box, box) == pytest.approx(0.0)
+
+    def test_zero_diagonal_returns_zero(self):
+        pred = (5.0, 5.0, 10.0, 10.0)
+        gt = (0.0, 0.0, 0.0, 0.0)  # degenerate box
+        assert normalized_center_distance(pred, gt) == pytest.approx(0.0)
+
+    def test_known_normalised_value(self):
+        # GT box: w=30, h=40 → diagonal = 50
+        # pred center shifted by (30, 40) → raw dist = 50, norm dist = 50/50 = 1.0
+        gt = (0.0, 0.0, 30.0, 40.0)
+        pred = (30.0, 40.0, 30.0, 40.0)
+        assert normalized_center_distance(pred, gt) == pytest.approx(1.0)
+
+    def test_result_is_non_negative(self):
+        a = (5.0, 5.0, 20.0, 20.0)
+        b = (100.0, 100.0, 20.0, 20.0)
+        assert normalized_center_distance(a, b) >= 0.0
 
 
 class TestBatchIoU:
@@ -129,3 +152,30 @@ class TestMetricsEngine:
         assert 0.0 <= result.mean_iou <= 1.0
         assert 0.0 <= result.success_auc <= 1.0
         assert 0.0 <= result.precision_auc <= 1.0
+
+    def test_norm_precision_curve_perfect(self):
+        # Identical boxes → normalised distance = 0 → precision = 1 at all thresholds > 0
+        preds = np.array([[5.0, 5.0, 30.0, 40.0]] * 10)
+        gts = np.array([[5.0, 5.0, 30.0, 40.0]] * 10)
+        thresholds, rates = self.engine.norm_precision_curve(preds, gts)
+        assert rates[-1] == pytest.approx(1.0)
+
+    def test_norm_precision_curve_shape(self):
+        preds = np.tile([0.0, 0.0, 20.0, 20.0], (20, 1))
+        gts = np.tile([5.0, 5.0, 20.0, 20.0], (20, 1))
+        thresholds, rates = self.engine.norm_precision_curve(preds, gts)
+        assert len(thresholds) == len(rates)
+        assert np.all(rates >= 0.0) and np.all(rates <= 1.0)
+
+    def test_compute_all_includes_norm_precision(self):
+        preds = np.tile([0.0, 0.0, 30.0, 40.0], (20, 1))
+        gts = np.tile([0.0, 0.0, 30.0, 40.0], (20, 1))
+        result = self.engine.compute_all(preds, gts)
+        assert 0.0 <= result.norm_precision_auc <= 1.0
+
+    def test_compute_all_perfect_tracker_norm_precision(self):
+        # Perfect predictions → norm_precision_auc should be high (close to 1)
+        preds = np.tile([0.0, 0.0, 30.0, 40.0], (30, 1))
+        gts = np.tile([0.0, 0.0, 30.0, 40.0], (30, 1))
+        result = self.engine.compute_all(preds, gts)
+        assert result.norm_precision_auc > 0.9
