@@ -66,6 +66,35 @@ def center_distance(pred: BBox, gt: BBox) -> float:
     return float(np.sqrt(dx * dx + dy * dy))
 
 
+def normalized_center_distance(pred: BBox, gt: BBox) -> float:
+    """Centre distance normalised by the GT box diagonal (LaSOT protocol).
+
+    Dividing by the GT diagonal makes the metric invariant to object size
+    and image resolution, enabling fair comparison across sequences with
+    differently-sized targets.
+
+    Args:
+        pred: Predicted box ``(x, y, w, h)``.
+        gt:   Ground-truth box ``(x, y, w, h)``.
+
+    Returns:
+        Normalised distance in ``[0, ∞)``.  Returns ``0.0`` when the GT
+        box has zero area (degenerate case).
+
+    Reference:
+        Fan et al., "LaSOT: A High-quality Benchmark for Large-scale
+        Single Object Tracking." CVPR 2019.
+    """
+    px, py, pw, ph = pred
+    gx, gy, gw, gh = gt
+    diagonal = float(np.sqrt(gw * gw + gh * gh))
+    if diagonal <= 0.0:
+        return 0.0
+    dx = (px + pw / 2) - (gx + gw / 2)
+    dy = (py + ph / 2) - (gy + gh / 2)
+    return float(np.sqrt(dx * dx + dy * dy) / diagonal)
+
+
 @dataclass
 class AccuracyMetrics:
     """Scalar accuracy summary for a tracker on a dataset or sequence."""
@@ -79,12 +108,18 @@ class AccuracyMetrics:
     precision_auc: float
     """Normalised AUC of the Precision Curve (distance thresholds 0 → 50 px)."""
 
+    norm_precision_auc: float = 0.0
+    """Normalised AUC of the Normalised Precision Curve (LaSOT protocol,
+    distance thresholds 0 → 0.5 of GT diagonal).  Comparable across
+    sequences with different target sizes and image resolutions."""
+
     def __str__(self) -> str:
         return (
             f"AccuracyMetrics("
             f"mIoU={self.mean_iou:.4f}, "
             f"success_AUC={self.success_auc:.4f}, "
-            f"precision_AUC={self.precision_auc:.4f})"
+            f"precision_AUC={self.precision_auc:.4f}, "
+            f"norm_precision_AUC={self.norm_precision_auc:.4f})"
         )
 
 
@@ -162,6 +197,40 @@ class MetricsEngine:
         rates = np.array([(dists < t).mean() for t in thresholds])
         return thresholds, rates
 
+    def norm_precision_curve(
+        self,
+        preds: np.ndarray,
+        gts: np.ndarray,
+        thresholds: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Normalised precision curve following the LaSOT evaluation protocol.
+
+        Centre distance is normalised by the diagonal of the GT bounding box,
+        making the metric independent of object size and image resolution.
+
+        Args:
+            preds:      ``(N, 4)`` predicted boxes in ``(x, y, w, h)`` format.
+            gts:        ``(N, 4)`` ground-truth boxes in ``(x, y, w, h)`` format.
+            thresholds: Normalised distance thresholds (default: 0 → 0.5 in
+                        51 steps, matching the LaSOT paper convention).
+
+        Returns:
+            ``(thresholds, precision_rates)`` — both shape ``(T,)``.
+
+        Reference:
+            Fan et al., "LaSOT: A High-quality Benchmark for Large-scale
+            Single Object Tracking." CVPR 2019.
+        """
+        if thresholds is None:
+            thresholds = np.linspace(0.0, 0.5, 51)
+        n = min(len(preds), len(gts))
+        norm_dists = np.array(
+            [normalized_center_distance(tuple(preds[i]), tuple(gts[i]))  # type: ignore[arg-type]
+             for i in range(n)]
+        )
+        rates = np.array([(norm_dists < t).mean() for t in thresholds])
+        return thresholds, rates
+
     def compute_all(
         self,
         preds: np.ndarray,
@@ -191,8 +260,12 @@ class MetricsEngine:
         thr_dist, pr = self.precision_curve(preds, gts)
         prec_auc = float(_trapz(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
 
+        thr_norm, npr = self.norm_precision_curve(preds, gts)
+        norm_prec_auc = float(_trapz(npr, thr_norm) / thr_norm[-1]) if thr_norm[-1] > 0 else 0.0
+
         return AccuracyMetrics(
             mean_iou=float(ious.mean()),
             success_auc=success_auc,
             precision_auc=prec_auc,
+            norm_precision_auc=norm_prec_auc,
         )

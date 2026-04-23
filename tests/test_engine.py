@@ -209,3 +209,47 @@ class TestBenchmarkEngine:
         result = self.engine.run(tracker, self.dataset, dataset_name="Synthetic")
         assert result.mean_center_distance is not None
         assert result.mean_center_distance > 0.0
+
+
+class TestBenchmarkEngineEnergy:
+    """Tests for energy profiling integration (requires tdp_watts != None)."""
+
+    def setup_method(self):
+        self.tracker = ConstantTracker(FIXED_BOX)
+        self.dataset = SyntheticDataset(n_sequences=2)
+
+    def test_energy_none_without_tdp(self):
+        engine = BenchmarkEngine(verbose=False)
+        result = engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        assert result.total_energy_j is None
+        for sr in result.sequence_results:
+            assert sr.energy is None
+
+    def test_energy_populated_with_tdp(self):
+        engine = BenchmarkEngine(verbose=False, tdp_watts=15.0)
+        result = engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        assert result.total_energy_j is not None
+        assert result.total_energy_j >= 0.0
+        for sr in result.sequence_results:
+            assert sr.energy is not None
+
+    def test_energy_per_frame_populated(self):
+        engine = BenchmarkEngine(verbose=False, tdp_watts=10.0)
+        result = engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        assert result.mean_energy_per_frame_mj is not None
+        assert result.mean_energy_per_frame_mj >= 0.0
+
+    def test_energy_included_in_summary(self):
+        engine = BenchmarkEngine(verbose=False, tdp_watts=15.0)
+        result = engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        s = result.summary()
+        assert "total_energy_j" in s
+        assert "mean_energy_per_frame_mj" in s
+
+    def test_energy_included_in_to_dict(self):
+        engine = BenchmarkEngine(verbose=False, tdp_watts=15.0)
+        result = engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        d = result.to_dict()
+        for entry in d["sequences"]:
+            assert "energy_j" in entry
+            assert "energy_per_frame_mj" in entry
