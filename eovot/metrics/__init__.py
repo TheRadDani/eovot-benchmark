@@ -6,5 +6,13 @@ from .accuracy import (
     AccuracyMetrics,
     MetricsEngine,
 )
+from .stability import IoUStabilityMetrics, compute_stability
 
-__all__ = ["iou", "center_distance", "AccuracyMetrics", "MetricsEngine"]
+__all__ = [
+    "iou",
+    "center_distance",
+    "AccuracyMetrics",
+    "MetricsEngine",
+    "IoUStabilityMetrics",
+    "compute_stability",
+]

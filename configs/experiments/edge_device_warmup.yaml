@@ -1,0 +1,79 @@
+# Edge-Device Tracker Comparison with Warm-Up
+#
+# Evaluates all classical trackers under realistic edge-device conditions:
+# - Tracker warm-up is enabled (5 frames) to eliminate cold-start timing bias
+# - Per-device TDP values are provided for energy estimation
+# - IoU stability analysis is recommended post-hoc via eovot.metrics.stability
+#
+# Usage (single tracker):
+#   eovot --config configs/experiments/edge_device_warmup.yaml \
+#         --tracker MOSSE --dataset-root /data/OTB100 --dataset-name OTB100
+#
+# Usage (multi-tracker comparison):
+#   python scripts/compare_trackers.py \
+#         --trackers MOSSE KCF CSRT MedianFlow \
+#         --dataset-root /data/OTB100 \
+#         --dataset-name OTB100 \
+#         --max-sequences 20 \
+#         --tdp-watts 6.0 \
+#         --output-dir results/edge_warmup/
+#
+# TDP reference values:
+#   Raspberry Pi 4:  6 W
+#   Jetson Nano:    10 W
+#   Laptop CPU:     15 W
+#   Desktop CPU:    65 W
+
+experiment:
+  name: edge_device_warmup_comparison
+  output_dir: results/edge_warmup/
+  seed: 42
+
+dataset:
+  name: OTB100
+  loader: OTBDataset
+  root: /data/OTB100
+  # Increase for a full benchmark run; 20 gives a fast representative sample.
+  max_sequences: 20
+
+tracker:
+  # Set the tracker name via --tracker CLI flag or edit here.
+  name: MOSSE
+  params:
+    MOSSE:
+      learning_rate: 0.125
+      sigma: 2.0
+    KCF:
+      learning_rate: 0.125
+      padding: 2.5
+      sigma: 0.6
+    CSRT:
+      {}
+    MedianFlow:
+      {}
+
+benchmark:
+  verbose: true
+  # Warm up the tracker before the timed evaluation loop.
+  # Primes NumPy FFT plans (MOSSE, KCF) and OpenCV memory pools.
+  # 5 frames is sufficient for correlation-filter trackers.
+  warmup_frames: 5
+  save_predictions: false
+  # Set to the CPU TDP (Watts) of your target edge device.
+  # Leave as null to disable energy profiling.
+  tdp_watts: 6.0   # Raspberry Pi 4
+
+reporting:
+  formats:
+    - json
+    - csv
+  print_summary: true
+
+# -----------------------------------------------------------------------
+# Expected performance baselines (OTB-100, 20 sequences)
+# -----------------------------------------------------------------------
+# Tracker       mIoU    FPS (Pi4)   Energy (mJ/fr)
+# MOSSE         ~0.46   ~80-120     ~0.5-1.0
+# KCF           ~0.52   ~40-80      ~0.8-1.5
+# CSRT          ~0.62   ~5-15       ~2.0-5.0
+# MedianFlow    ~0.44   ~25-60      ~0.5-1.5

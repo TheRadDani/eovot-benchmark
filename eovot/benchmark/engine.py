@@ -180,10 +180,25 @@ class BenchmarkEngine:
             value (Watts).  Set to the device's CPU TDP for meaningful
             estimates (e.g. ``6.0`` for Raspberry Pi 4, ``15.0`` for a
             laptop).  Default: ``None`` (energy profiling disabled).
+        warmup_frames: Number of synthetic update steps to run before the
+            timed evaluation loop starts.  This primes internal caches such
+            as NumPy FFT plans (MOSSE/KCF) and OpenCV memory pools so the
+            first measured frame does not carry cold-start overhead.
+            A value of ``5`` is a reasonable default for correlation-filter
+            trackers.  Default: ``0`` (warm-up disabled — backward-compatible
+            behaviour).
     """
 
-    def __init__(self, verbose: bool = True, tdp_watts: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        verbose: bool = True,
+        tdp_watts: Optional[float] = None,
+        warmup_frames: int = 0,
+    ) -> None:
+        if warmup_frames < 0:
+            raise ValueError(f"warmup_frames must be >= 0, got {warmup_frames}")
         self.verbose = verbose
+        self.warmup_frames = warmup_frames
         self._metrics = MetricsEngine()
         self._profiler = Profiler()
         self._energy_profiler: Optional[EnergyProfiler] = (
@@ -203,7 +218,8 @@ class BenchmarkEngine:
 
         if self.verbose:
             energy_tag = f"  [energy TDP={self._energy_profiler.tdp_watts}W]" if self._energy_profiler else ""
-            print(f"\nEvaluating {tracker.name} on {dataset_name} ({n} sequences){energy_tag}")
+            warmup_tag = f"  [warmup={self.warmup_frames}fr]" if self.warmup_frames > 0 else ""
+            print(f"\nEvaluating {tracker.name} on {dataset_name} ({n} sequences){energy_tag}{warmup_tag}")
             print("-" * 60)
 
         for idx in range(n):
@@ -227,6 +243,20 @@ class BenchmarkEngine:
 
         return result
 
+    def _warmup_tracker(self, tracker: BaseTracker, frame: np.ndarray, bbox) -> None:
+        """Prime the tracker's internal caches without recording timings.
+
+        Runs ``self.warmup_frames`` tracker update steps on a blank frame of
+        the same spatial dimensions as *frame*, then re-initialises the
+        tracker so the timed evaluation loop starts from a clean state.
+        """
+        if self.warmup_frames <= 0:
+            return
+        blank = np.zeros_like(frame)
+        tracker.initialize(blank, bbox)
+        for _ in range(self.warmup_frames):
+            tracker.update(blank)
+
     def _run_sequence(self, tracker: BaseTracker, seq: Sequence) -> SequenceResult:
         self._profiler.reset()
         if self._energy_profiler is not None:
@@ -238,6 +268,8 @@ class BenchmarkEngine:
 
         for i, frame in enumerate(frames):
             if i == 0:
+                # Warm up before timed evaluation to avoid cold-start skew.
+                self._warmup_tracker(tracker, frame, seq.init_bbox)
                 tracker.initialize(frame, seq.init_bbox)
                 preds.append(seq.init_bbox)
             else:
