@@ -7,6 +7,7 @@ from .accuracy import (
     MetricsEngine,
 )
 from .robustness import RobustnessAnalyzer, RobustnessResult
+from .deployment_score import DeploymentScore, DeploymentScorer, score_all_devices
 
 __all__ = [
     "iou",
@@ -15,4 +16,7 @@ __all__ = [
     "MetricsEngine",
     "RobustnessAnalyzer",
     "RobustnessResult",
+    "DeploymentScore",
+    "DeploymentScorer",
+    "score_all_devices",
 ]
