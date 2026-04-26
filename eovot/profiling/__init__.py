@@ -2,5 +2,20 @@
 
 from .profiler import Profiler, ProfilingResult
 from .energy import EnergyProfiler, EnergyResult
+from .complexity import (
+    ComplexityReport,
+    TrackerComplexityAnalyzer,
+    SUPPORTED_TRACKERS,
+    analyze_tracker_complexity,
+)
 
-__all__ = ["Profiler", "ProfilingResult", "EnergyProfiler", "EnergyResult"]
+__all__ = [
+    "Profiler",
+    "ProfilingResult",
+    "EnergyProfiler",
+    "EnergyResult",
+    "ComplexityReport",
+    "TrackerComplexityAnalyzer",
+    "SUPPORTED_TRACKERS",
+    "analyze_tracker_complexity",
+]
