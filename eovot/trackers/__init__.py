@@ -3,6 +3,7 @@ from .mosse import MOSSETracker
 from .kcf import KCFTracker
 from .csrt import CSRTTracker
 from .median_flow import MedianFlowTracker
+from .siamfc_lite import SiamFCLiteTracker
 
 __all__ = [
     "BaseTracker",
@@ -11,4 +12,5 @@ __all__ = [
     "KCFTracker",
     "CSRTTracker",
     "MedianFlowTracker",
+    "SiamFCLiteTracker",
 ]
