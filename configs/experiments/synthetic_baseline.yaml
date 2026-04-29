@@ -1,0 +1,57 @@
+# EOVOT Experiment: Classical Tracker Baseline on Synthetic Sequences
+#
+# This config benchmarks all four classical trackers on a synthetic dataset,
+# producing a reproducible accuracy-vs-efficiency table without requiring any
+# external video or annotation files.  Intended for:
+#
+#   - CI pipelines where real datasets are not available.
+#   - Ablation studies over motion complexity (change `motion` below).
+#   - Onboarding: verifying the full benchmark pipeline works end-to-end.
+#
+# Motion patterns: linear | circular | sinusoidal | random
+#
+# Usage (single tracker):
+#   python scripts/run_benchmark.py --config configs/experiments/synthetic_baseline.yaml
+#
+# Usage (all four trackers, comparison table):
+#   python scripts/compare_trackers.py \
+#     --trackers MOSSE KCF CSRT MedianFlow \
+#     --dataset-loader SyntheticDataset \
+#     --dataset-root synthetic \
+#     --dataset-name Synthetic-linear \
+#     --output-dir results/synthetic-baseline/
+#
+# Expected behaviour (MOSSE, linear motion, 50 frames × 10 sequences):
+#   mIoU ≈ 0.85–0.95   (MOSSE tracks a rigid, linearly moving target well)
+#   FPS  ≈ 400–600      (pure NumPy, no GPU)
+
+experiment:
+  name: "synthetic-baseline-mosse"
+  output_dir: "results/synthetic-baseline/"
+  seed: 42
+
+dataset:
+  name: "Synthetic-linear"
+  loader: "SyntheticDataset"
+  # SyntheticDataset ignores `root`; all parameters go under `params`.
+  root: "synthetic"
+  params:
+    n_sequences: 10          # number of independent sequences
+    n_frames: 50             # frames per sequence
+    motion: "linear"         # linear | circular | sinusoidal | random
+    speed: 3.0               # pixels moved per frame
+    seed: 42                 # global RNG seed for reproducibility
+
+tracker:
+  name: "MOSSE"
+  params:
+    learning_rate: 0.125
+    sigma: 2.0
+
+benchmark:
+  verbose: true
+  tdp_watts: null            # set to e.g. 15.0 to enable CPU energy estimation
+
+reporting:
+  formats: ["json", "csv"]
+  print_summary: true
