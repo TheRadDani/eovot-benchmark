@@ -4,6 +4,12 @@ from .kcf import KCFTracker
 from .csrt import CSRTTracker
 from .median_flow import MedianFlowTracker
 
+try:
+    from .siamfc import SiamFCTracker
+    _SIAMFC_AVAILABLE = True
+except ImportError:
+    _SIAMFC_AVAILABLE = False
+
 __all__ = [
     "BaseTracker",
     "BBox",
@@ -12,3 +18,6 @@ __all__ = [
     "CSRTTracker",
     "MedianFlowTracker",
 ]
+
+if _SIAMFC_AVAILABLE:
+    __all__.append("SiamFCTracker")
