@@ -9,6 +9,8 @@ import numpy as np
 
 from ..datasets.base import BaseDataset, Sequence
 from ..metrics.accuracy import MetricsEngine, center_distance
+from ..metrics.robustness import RobustnessAnalyzer, RobustnessResult
+from ..profiling.energy import EnergyProfiler, EnergyResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
 
@@ -21,6 +23,8 @@ class SequenceResult:
     predictions: Optional[np.ndarray] = None       # shape (N, 4) — predicted boxes
     ground_truths: Optional[np.ndarray] = None     # shape (N, 4) — GT boxes aligned to predictions
     center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
+    energy: Optional[EnergyResult] = None          # energy estimate; None when TDP not configured
+    robustness: Optional[RobustnessResult] = None  # VOT-style robustness analysis
 
     @property
     def mean_iou(self) -> float:
@@ -80,6 +84,30 @@ class BenchmarkResult:
             return None
         return float(np.mean([r.energy.energy_per_frame_mj for r in with_energy]))
 
+    @property
+    def mean_eao(self) -> Optional[float]:
+        """Mean Expected Average Overlap across sequences, or None if not computed."""
+        rob = [r.robustness for r in self.sequence_results if r.robustness is not None]
+        if not rob:
+            return None
+        return float(np.mean([r.eao for r in rob]))
+
+    @property
+    def total_failures(self) -> Optional[int]:
+        """Total tracking failures across all sequences, or None if not computed."""
+        rob = [r.robustness for r in self.sequence_results if r.robustness is not None]
+        if not rob:
+            return None
+        return sum(r.num_failures for r in rob)
+
+    @property
+    def mean_survival_rate(self) -> Optional[float]:
+        """Mean survival rate (fraction of frames above IoU threshold), or None."""
+        rob = [r.robustness for r in self.sequence_results if r.robustness is not None]
+        if not rob:
+            return None
+        return float(np.mean([r.survival_rate for r in rob]))
+
     def summary(self) -> Dict:
         d: Dict = {
             "tracker": self.tracker_name,
@@ -92,70 +120,49 @@ class BenchmarkResult:
         mcd = self.mean_center_distance
         if mcd is not None:
             d["mean_center_distance_px"] = round(mcd, 3)
+        eao = self.mean_eao
+        if eao is not None:
+            d["mean_eao"] = round(eao, 4)
+        failures = self.total_failures
+        if failures is not None:
+            d["total_failures"] = failures
+        survival = self.mean_survival_rate
+        if survival is not None:
+            d["mean_survival_rate"] = round(survival, 4)
+        e_total = self.total_energy_j
+        if e_total is not None:
+            d["total_energy_j"] = round(e_total, 4)
+        e_frame = self.mean_energy_per_frame_mj
+        if e_frame is not None:
+            d["mean_energy_per_frame_mj"] = round(e_frame, 4)
         return d
 
     def to_dict(self) -> Dict:
-        """Serialise to the dict format consumed by :class:`~eovot.reporting.reporter.BenchmarkReporter`.
-
-        Returns a dict with two keys:
-
-        * ``"summary"`` — aggregate scalar metrics (same as :meth:`summary`).
-        * ``"sequences"`` — list of per-sequence metric dicts.
-        """
-        sequences = []
-        for sr in self.sequence_results:
-            entry: Dict = {
-                "sequence_name": sr.sequence_name,
-                "mean_iou": round(sr.mean_iou, 4),
-                "fps": round(sr.profiling.fps, 2),
-                "mean_latency_ms": round(sr.profiling.latency_mean_ms, 3),
-                "peak_memory_mb": round(sr.profiling.peak_memory_mb, 2),
-            }
-            if sr.energy is not None:
-                entry["energy_j"] = round(sr.energy.total_energy_j, 6)
-                entry["energy_per_frame_mj"] = round(sr.energy.energy_per_frame_mj, 4)
-            sequences.append(entry)
-        return {"summary": self.summary(), "sequences": sequences}
-
-    def to_dict(self) -> Dict:
-        """Serialise to the dict format consumed by :class:`~eovot.reporting.reporter.BenchmarkReporter`.
-
-        Returns a dict with two keys:
-
-        * ``"summary"`` — aggregate scalar metrics (same as :meth:`summary`).
-        * ``"sequences"`` — list of per-sequence metric dicts.
-        """
-        return {
-            "summary": self.summary(),
-            "sequences": [
-                {
-                    "sequence_name": sr.sequence_name,
-                    "mean_iou": round(sr.mean_iou, 4),
-                    "fps": round(sr.profiling.fps, 2),
-                    "mean_latency_ms": round(sr.profiling.latency_mean_ms, 3),
-                    "peak_memory_mb": round(sr.profiling.peak_memory_mb, 2),
-                }
-                for sr in self.sequence_results
-            ],
-        }
-
-    def to_dict(self) -> Dict:
-        """Serialize the full result to a dict compatible with :class:`~eovot.reporting.reporter.BenchmarkReporter`.
+        """Serialize the full result to a dict compatible with
+        :class:`~eovot.reporting.reporter.BenchmarkReporter`.
 
         Returns a nested dict with keys ``"summary"`` (aggregate metrics)
         and ``"sequences"`` (per-sequence breakdown), suitable for JSON
         export and Markdown table generation.
         """
-        sequences = [
-            {
+        sequences = []
+        for r in self.sequence_results:
+            entry: Dict = {
                 "sequence_name": r.sequence_name,
                 "mean_iou": round(r.mean_iou, 4),
                 "fps": round(r.profiling.fps, 2),
                 "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
                 "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
             }
-            for r in self.sequence_results
-        ]
+            if r.energy is not None:
+                entry["energy_j"] = round(r.energy.total_energy_j, 6)
+                entry["energy_per_frame_mj"] = round(r.energy.energy_per_frame_mj, 4)
+            if r.robustness is not None:
+                entry["eao"] = round(r.robustness.eao, 4)
+                entry["num_failures"] = r.robustness.num_failures
+                entry["survival_rate"] = round(r.robustness.survival_rate, 4)
+                entry["mean_recovery_lag"] = round(r.robustness.mean_recovery_lag, 2)
+            sequences.append(entry)
         return {"summary": self.summary(), "sequences": sequences}
 
     def __str__(self) -> str:
@@ -165,13 +172,15 @@ class BenchmarkResult:
             f"mIoU={s['mean_iou']}  FPS={s['mean_fps']}  "
             f"mem={s['peak_memory_mb']} MiB  ({s['num_sequences']} sequences)"
         )
+        if "mean_eao" in s:
+            base += f"  EAO={s['mean_eao']}"
         if "total_energy_j" in s:
             base += f"  energy={s['total_energy_j']} J"
         return base
 
 
 class BenchmarkEngine:
-    """Run a tracker against a dataset and collect accuracy + profiling data.
+    """Run a tracker against a dataset and collect accuracy, robustness, and profiling data.
 
     Args:
         verbose: Print per-sequence progress to stdout. Default: ``True``.
@@ -180,12 +189,26 @@ class BenchmarkEngine:
             value (Watts).  Set to the device's CPU TDP for meaningful
             estimates (e.g. ``6.0`` for Raspberry Pi 4, ``15.0`` for a
             laptop).  Default: ``None`` (energy profiling disabled).
+        failure_threshold: IoU below which a frame is counted as a tracking
+            failure for robustness analysis. Default: ``0.1``.
+        burn_in_frames: Frames to skip at sequence start before counting
+            failures. Default: ``5``.
     """
 
-    def __init__(self, verbose: bool = True, tdp_watts: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        verbose: bool = True,
+        tdp_watts: Optional[float] = None,
+        failure_threshold: float = 0.1,
+        burn_in_frames: int = 5,
+    ) -> None:
         self.verbose = verbose
         self._metrics = MetricsEngine()
         self._profiler = Profiler()
+        self._robustness = RobustnessAnalyzer(
+            failure_threshold=failure_threshold,
+            burn_in_frames=burn_in_frames,
+        )
         self._energy_profiler: Optional[EnergyProfiler] = (
             EnergyProfiler(tdp_watts=tdp_watts) if tdp_watts is not None else None
         )
@@ -197,7 +220,11 @@ class BenchmarkEngine:
         dataset_name: str = "unknown",
         max_sequences: Optional[int] = None,
     ) -> BenchmarkResult:
-        """Evaluate *tracker* on every sequence in *dataset*."""
+        """Evaluate *tracker* on every sequence in *dataset*.
+
+        Returns a :class:`BenchmarkResult` containing per-sequence and
+        aggregate accuracy, robustness, profiling, and (optionally) energy metrics.
+        """
         result = BenchmarkResult(tracker_name=tracker.name, dataset_name=dataset_name)
         n = min(len(dataset), max_sequences) if max_sequences is not None else len(dataset)
 
@@ -211,14 +238,20 @@ class BenchmarkEngine:
             seq_result = self._run_sequence(tracker, seq)
             result.sequence_results.append(seq_result)
             if self.verbose:
+                rob_str = ""
+                if seq_result.robustness is not None:
+                    rob_str = (
+                        f"  EAO={seq_result.robustness.eao:.3f}"
+                        f"  fails={seq_result.robustness.num_failures}"
+                    )
                 energy_str = ""
                 if seq_result.energy is not None:
                     energy_str = f"  E={seq_result.energy.energy_per_frame_mj:.2f}mJ/fr"
                 print(
-                    f"  [{idx + 1:>3}/{n}] {seq_result.sequence_name:<30s} "
+                    f"  [{idx + 1:>3}/{n}] {seq_result.sequence_name:<28s} "
                     f"mIoU={seq_result.mean_iou:.3f}  "
                     f"FPS={seq_result.profiling.fps:.1f}"
-                    f"{energy_str}"
+                    f"{rob_str}{energy_str}"
                 )
 
         if self.verbose:
@@ -257,11 +290,16 @@ class BenchmarkEngine:
 
         ious = self._metrics.batch_iou(preds_eval, gt_eval)
 
-        # Compute per-frame centre-distances so precision curves use real data.
         dists = np.array(
             [center_distance(tuple(preds_eval[i]), tuple(gt_eval[i]))  # type: ignore[arg-type]
              for i in range(n_eval)],
             dtype=np.float64,
+        )
+
+        robustness = self._robustness.analyze_sequence(
+            ious,
+            tracker_name=tracker.name,
+            sequence_name=seq.name,
         )
 
         energy: Optional[EnergyResult] = None
@@ -278,4 +316,6 @@ class BenchmarkEngine:
             predictions=preds_eval,
             ground_truths=gt_eval,
             center_distances=dists,
+            energy=energy,
+            robustness=robustness,
         )

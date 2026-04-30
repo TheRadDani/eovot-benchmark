@@ -209,3 +209,79 @@ class TestBenchmarkEngine:
         result = self.engine.run(tracker, self.dataset, dataset_name="Synthetic")
         assert result.mean_center_distance is not None
         assert result.mean_center_distance > 0.0
+
+    # ------------------------------------------------------------------
+    # Robustness integration
+    # ------------------------------------------------------------------
+
+    def test_sequence_result_has_robustness(self):
+        """Engine must compute a RobustnessResult for every sequence."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        for sr in result.sequence_results:
+            assert sr.robustness is not None
+
+    def test_perfect_tracker_no_failures(self):
+        """A perfect tracker predicting exact GT should report zero failures."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        for sr in result.sequence_results:
+            assert sr.robustness.num_failures == 0
+
+    def test_perfect_tracker_eao_near_one(self):
+        """Perfect tracking means EAO ≈ 1.0 (after burn-in)."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        for sr in result.sequence_results:
+            assert sr.robustness.eao == pytest.approx(1.0)
+
+    def test_perfect_tracker_survival_rate_one(self):
+        """A tracker with IoU=1.0 throughout should have survival_rate=1.0."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        for sr in result.sequence_results:
+            assert sr.robustness.survival_rate == pytest.approx(1.0)
+
+    def test_benchmark_result_mean_eao(self):
+        """BenchmarkResult.mean_eao aggregates EAO across all sequences."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        assert result.mean_eao is not None
+        assert result.mean_eao == pytest.approx(1.0)
+
+    def test_benchmark_result_total_failures(self):
+        """BenchmarkResult.total_failures is zero for a perfect tracker."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        assert result.total_failures == 0
+
+    def test_benchmark_result_mean_survival_rate(self):
+        """BenchmarkResult.mean_survival_rate is 1.0 for a perfect tracker."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        assert result.mean_survival_rate == pytest.approx(1.0)
+
+    def test_summary_includes_robustness_keys(self):
+        """summary() must include mean_eao, total_failures, mean_survival_rate."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        s = result.summary()
+        assert "mean_eao" in s
+        assert "total_failures" in s
+        assert "mean_survival_rate" in s
+
+    def test_to_dict_sequences_include_robustness(self):
+        """to_dict() sequences must carry per-sequence robustness fields."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        d = result.to_dict()
+        for seq_entry in d["sequences"]:
+            assert "eao" in seq_entry
+            assert "num_failures" in seq_entry
+            assert "survival_rate" in seq_entry
+
+    def test_imperfect_tracker_has_failures(self):
+        """A tracker with low IoU should accumulate failures in the report."""
+        zero_box = (500.0, 500.0, 10.0, 10.0)  # far from GT, IoU ≈ 0
+        tracker = ConstantTracker(zero_box)
+        result = self.engine.run(tracker, self.dataset, dataset_name="Synthetic")
+        assert result.total_failures is not None
+        assert result.total_failures > 0
+
+    def test_custom_failure_threshold(self):
+        """BenchmarkEngine respects custom failure_threshold parameter."""
+        engine = BenchmarkEngine(verbose=False, failure_threshold=0.9)
+        result = engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        # Perfect tracker (IoU=1.0) still beats a 0.9 threshold
+        assert result.total_failures == 0
