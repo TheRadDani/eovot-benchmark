@@ -1,0 +1,45 @@
+# EOVOT — Synthetic Dataset Quick Evaluation
+# -------------------------------------------
+# Runs all classical trackers on programmatically generated sequences.
+# No dataset download required. Useful for:
+#   - Smoke-testing the benchmark pipeline
+#   - Algorithm development and debugging
+#   - Controlled experiments with known ground truth
+#
+# Usage:
+#   python scripts/run_benchmark.py --config configs/experiments/synthetic_quick_eval.yaml
+
+experiment:
+  name: "synthetic-quick-eval"
+  output_dir: "results/synthetic/"
+  seed: 42
+
+dataset:
+  # SyntheticDataset generates sequences in memory — no root path needed.
+  loader: "SyntheticDataset"
+  preset: "quick"           # quick | stress_test | scale_challenge
+  n_sequences: 10
+  n_frames: 60
+  frame_size: [240, 320]    # [H, W]
+  motion: "linear"          # linear | sinusoidal | random_walk
+  name: "Synthetic-Quick"
+  seed: 42
+
+trackers:
+  - name: MOSSE
+    params: {}
+
+  - name: KCF
+    params:
+      learning_rate: 0.075
+
+  - name: CSRT
+    params: {}
+
+benchmark:
+  verbose: true
+  # tdp_watts: 15.0        # uncomment to enable CPU energy profiling
+
+reporting:
+  formats: ["json", "csv"]
+  print_summary: true
