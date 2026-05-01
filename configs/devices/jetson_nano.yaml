@@ -1,0 +1,34 @@
+# Device profile: NVIDIA Jetson Nano Developer Kit
+#
+# The Jetson Nano runs classical trackers on its ARM CPU and can accelerate
+# deep trackers (SiamRPN, NanoTrack) via its Maxwell GPU.
+# This profile targets CPU-only trackers; GPU trackers will exceed these FPS
+# limits significantly.
+
+device:
+  name: "NVIDIA Jetson Nano"
+  description: >
+    NVIDIA Jetson Nano Developer Kit (4 GB).
+    Quad-core ARM Cortex-A57 @ 1.43 GHz, 4 GB LPDDR4, 128-core Maxwell GPU.
+    10 W power mode (default); 5 W low-power mode available.
+    Classical CPU trackers run well; GPU-accelerated deep trackers are the
+    primary target platform for SiamRPN and similar architectures.
+  min_fps: 25.0
+  max_memory_mb: 512.0
+  tdp_watts: 10.0
+  max_energy_per_frame_mj: 8.0
+
+benchmark_guidance:
+  recommended_trackers:
+    - MOSSE
+    - KCF
+    - MedianFlow
+  marginal_trackers:
+    - CSRT       # ~25–35 FPS in 10 W mode
+  gpu_accelerated:
+    - NanoTrack  # 60+ FPS via ONNX + GPU
+    - DaSiamRPN  # 30+ FPS via TensorRT
+  notes:
+    - "Set tdp_watts: 10.0 in BenchmarkEngine for energy profiling."
+    - "Use tegrastats for true board-level power measurement."
+    - "Jetson shared CPU/GPU memory: peak_memory_mb is RSS only."

@@ -1,0 +1,27 @@
+# Device profile: Generic Laptop CPU
+#
+# Represents a 15 W TDP laptop (Intel Core i5/i7 U-series or equivalent).
+# Use as the development baseline before testing on constrained hardware.
+
+device:
+  name: "Laptop CPU"
+  description: >
+    Generic laptop with a 15 W TDP CPU (e.g. Intel Core i5/i7 U-series,
+    AMD Ryzen 5/7 mobile). 16 GB RAM, no GPU acceleration assumed.
+    Comfortable baseline for all classical trackers; suitable for
+    development and CI evaluation.
+  min_fps: 30.0
+  max_memory_mb: 2048.0
+  tdp_watts: 15.0
+  max_energy_per_frame_mj: 50.0
+
+benchmark_guidance:
+  recommended_trackers:
+    - MOSSE
+    - KCF
+    - MedianFlow
+    - CSRT
+  notes:
+    - "All classical trackers comfortably exceed 30 FPS on this hardware."
+    - "Use tdp_watts: 15.0 for energy estimates."
+    - "Deep trackers (SiamRPN) will be slow without GPU — use ONNX Runtime."

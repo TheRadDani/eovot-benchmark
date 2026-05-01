@@ -34,9 +34,9 @@ from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
 from eovot.datasets.lasot import LaSOTDataset
+from eovot.profiling.device_profiles import get_profile, list_profiles
 from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.mosse import MOSSETracker
-from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.csrt import CSRTTracker
 from eovot.trackers.median_flow import MedianFlowTracker
 
@@ -74,6 +74,15 @@ def _load_config(path: str) -> Dict:
         return yaml.safe_load(f)
 
 
+def _resolve_tdp(args: argparse.Namespace) -> Optional[float]:
+    """Return the TDP to use: device profile takes precedence over --tdp-watts."""
+    if getattr(args, "device_profile", None):
+        profile = get_profile(args.device_profile)
+        print(f"[device] Using profile '{profile.display_name}' — TDP={profile.tdp_watts} W")
+        return profile.tdp_watts
+    return getattr(args, "tdp_watts", None)
+
+
 def _config_from_args(args: argparse.Namespace) -> Dict:
     """Build a minimal config dict from CLI arguments."""
     return {
@@ -93,7 +102,7 @@ def _config_from_args(args: argparse.Namespace) -> Dict:
         },
         "benchmark": {
             "verbose": not args.quiet,
-            "tdp_watts": args.tdp_watts,
+            "tdp_watts": _resolve_tdp(args),
         },
         "reporting": {
             "formats": ["json"],
@@ -216,8 +225,27 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tdp-watts", type=float, default=None, metavar="W",
                         help=(
                             "Enable CPU energy estimation with this TDP (Watts). "
-                            "E.g. 6.0 for Raspberry Pi 4, 15.0 for a laptop."
+                            "E.g. 6.0 for Raspberry Pi 4, 15.0 for a laptop. "
+                            "Ignored if --device-profile is set."
                         ))
+    profile_choices = [name for name, _ in list_profiles()]
+    parser.add_argument(
+        "--device-profile",
+        default=None,
+        metavar="PROFILE",
+        choices=profile_choices,
+        help=(
+            "Named hardware profile for energy estimation. "
+            "Sets TDP automatically based on known device specs. "
+            f"Available: {', '.join(profile_choices)}. "
+            "Takes precedence over --tdp-watts."
+        ),
+    )
+    parser.add_argument(
+        "--list-devices",
+        action="store_true",
+        help="Print all available device profiles and exit.",
+    )
     return parser
 
 
@@ -225,8 +253,25 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
+    if getattr(args, "list_devices", False):
+        print("\nAvailable EOVOT device profiles:\n")
+        print(f"  {'Name':<22} {'Class':<14} {'TDP (W)':>7}  Description")
+        print("  " + "-" * 70)
+        for name, profile in list_profiles():
+            print(
+                f"  {name:<22} {profile.device_class:<14} {profile.tdp_watts:>7.1f}  "
+                f"{profile.description}"
+            )
+        print()
+        sys.exit(0)
+
     if args.config:
         cfg = _load_config(args.config)
+        # Allow device-profile override from CLI even when using a config file
+        if getattr(args, "device_profile", None):
+            profile = get_profile(args.device_profile)
+            cfg.setdefault("benchmark", {})["tdp_watts"] = profile.tdp_watts
+            print(f"[device] Profile override '{profile.display_name}' — TDP={profile.tdp_watts} W")
     elif args.dataset_root:
         cfg = _config_from_args(args)
     else:
