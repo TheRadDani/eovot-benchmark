@@ -15,7 +15,7 @@ Usage::
 
     # Full OTB100 evaluation
     python scripts/compare_trackers.py \\
-        --trackers MOSSE KCF \\
+        --trackers MOSSE KCF CSRT MedianFlow \\
         --dataset-root /data/OTB100 \\
         --dataset-name OTB100 \\
         --output-dir results/
@@ -32,6 +32,18 @@ Usage::
         --trackers MOSSE KCF \\
         --dataset-root /data/OTB100 \\
         --tdp-watts 15.0
+
+    # Using a named device profile (sets TDP automatically)
+    python scripts/compare_trackers.py \\
+        --trackers MOSSE KCF CSRT \\
+        --dataset-root /data/OTB100 \\
+        --device-profile raspberry_pi4
+
+    # With deployability check
+    python scripts/compare_trackers.py \\
+        --trackers MOSSE KCF CSRT \\
+        --dataset-root /data/OTB100 \\
+        --device raspberry_pi4
 """
 
 from __future__ import annotations
@@ -48,6 +60,7 @@ from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
 from eovot.datasets.lasot import LaSOTDataset
 from eovot.profiling.device_profile import DEVICE_PRESETS, DeployabilityChecker
+from eovot.profiling.device_profiles import get_profile, list_profiles
 from eovot.reporting.reporter import BenchmarkReporter
 from eovot.trackers.csrt import CSRTTracker
 from eovot.trackers.kcf import KCFTracker
@@ -72,17 +85,9 @@ DATASET_REGISTRY = {
 }
 
 
-def _build_dataset(loader_name: str, root: str, split: str, max_sequences):
-    """Instantiate the dataset, handling different constructor signatures."""
-    cls = DATASET_REGISTRY[loader_name]
-    if loader_name == "GOT10kDataset":
-        return cls(root=root, split=split, max_sequences=max_sequences)
-    if loader_name == "LaSOTDataset":
-        return cls(root=root, split=split, max_sequences=max_sequences)
-    return cls(root=root)
-
-
 def main() -> None:
+    profile_choices = [name for name, _ in list_profiles()]
+
     parser = argparse.ArgumentParser(
         prog="compare_trackers",
         description="Run multiple EOVOT trackers on a dataset and generate a comparison table.",
@@ -135,7 +140,19 @@ def main() -> None:
         metavar="W",
         help=(
             "Enable CPU energy estimation using this TDP value in Watts. "
-            "Example: 6.0 for Raspberry Pi 4, 15.0 for a laptop CPU."
+            "Example: 6.0 for Raspberry Pi 4, 15.0 for a laptop CPU. "
+            "Ignored if --device-profile is set."
+        ),
+    )
+    parser.add_argument(
+        "--device-profile",
+        default=None,
+        metavar="PROFILE",
+        choices=profile_choices,
+        help=(
+            "Named hardware profile — sets TDP automatically. "
+            f"Available: {', '.join(profile_choices)}. "
+            "Takes precedence over --tdp-watts."
         ),
     )
     parser.add_argument(
@@ -148,15 +165,39 @@ def main() -> None:
             f"Choices: {list(DEVICE_PRESETS)}"
         ),
     )
+    parser.add_argument(
+        "--list-devices",
+        action="store_true",
+        help="Print all available device profiles and exit.",
+    )
     args = parser.parse_args()
+
+    if args.list_devices:
+        print("\nAvailable EOVOT device profiles:\n")
+        print(f"  {'Name':<22} {'Class':<14} {'TDP (W)':>7}  Description")
+        print("  " + "-" * 70)
+        for name, profile in list_profiles():
+            print(
+                f"  {name:<22} {profile.device_class:<14} {profile.tdp_watts:>7.1f}  "
+                f"{profile.description}"
+            )
+        print()
+        sys.exit(0)
+
+    # Resolve TDP: device profile takes precedence over --tdp-watts
+    tdp = args.tdp_watts
+    if args.device_profile:
+        hw = get_profile(args.device_profile)
+        tdp = hw.tdp_watts
+        print(f"\n[device] Using profile '{hw.display_name}' — TDP={tdp} W")
 
     dataset_name = args.dataset_name or args.dataset_loader
     reporter = BenchmarkReporter(output_dir=args.output_dir)
-    engine = BenchmarkEngine(verbose=True, tdp_watts=args.tdp_watts)
+    engine = BenchmarkEngine(verbose=True, tdp_watts=tdp)
     checker = DeployabilityChecker() if args.device else None
 
     all_results = []
-    raw_results = []  # BenchmarkResult objects needed for deployability check
+    raw_results = []
 
     for tracker_name in args.trackers:
         print(f"\n{'=' * 60}")
@@ -195,8 +236,8 @@ def main() -> None:
 
         # Per-tracker deployability report
         if checker is not None and args.device:
-            profile = DEVICE_PRESETS[args.device]
-            report = checker.check(result, profile)
+            deploy_profile = DEVICE_PRESETS[args.device]
+            report = checker.check(result, deploy_profile)
             print(f"\n{report}")
 
     # -----------------------------------------------------------------------
@@ -211,13 +252,13 @@ def main() -> None:
     # Cross-tracker deployability summary
     # -----------------------------------------------------------------------
     if checker is not None and args.device and len(raw_results) > 1:
-        profile = DEVICE_PRESETS[args.device]
+        deploy_profile = DEVICE_PRESETS[args.device]
         print(f"\n{'=' * 60}")
-        print(f"  Deployability Summary for {profile.name}")
+        print(f"  Deployability Summary for {deploy_profile.name}")
         print(f"{'=' * 60}")
         for r in raw_results:
-            rpt = checker.check(r, profile)
-            verdict = "OK" if rpt.deployable else "FAIL"
+            rpt = checker.check(r, deploy_profile)
+            verdict = "OK  " if rpt.deployable else "FAIL"
             print(f"  [{verdict}]  {r.tracker_name:<16s}  FPS={r.mean_fps:.1f}  mem={r.peak_memory_mb:.0f} MB")
 
 
