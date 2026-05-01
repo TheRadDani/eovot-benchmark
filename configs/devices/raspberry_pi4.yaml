@@ -1,0 +1,37 @@
+# Device profile: Raspberry Pi 4 Model B
+#
+# Use this profile with DeployabilityChecker to evaluate whether a tracker
+# can run in real time on a Raspberry Pi 4.
+#
+# Example usage:
+#   from eovot.profiling.device_profile import DeviceProfile, DeployabilityChecker
+#   import yaml
+#   with open("configs/devices/raspberry_pi4.yaml") as f:
+#       cfg = yaml.safe_load(f)
+#   profile = DeviceProfile(**cfg["device"])
+#   report = DeployabilityChecker().check(benchmark_result, profile)
+
+device:
+  name: "Raspberry Pi 4"
+  description: >
+    Raspberry Pi 4 Model B (4 GB variant).
+    ARM Cortex-A72 @ 1.5 GHz, 4 GB LPDDR4-3200, VideoCore VI GPU.
+    Typical tracking use-case: 15 FPS real-time inference at 6 W TDP.
+    Suitable for MOSSE and KCF; CSRT may run below real-time threshold.
+  min_fps: 15.0
+  max_memory_mb: 256.0
+  tdp_watts: 6.0
+  max_energy_per_frame_mj: 10.0
+
+benchmark_guidance:
+  recommended_trackers:
+    - MOSSE      # 500+ FPS — very comfortable
+    - KCF        # 150–350 FPS — comfortable
+  marginal_trackers:
+    - MedianFlow # ~60–80 FPS on RPi4
+  not_recommended:
+    - CSRT       # ~10–15 FPS on RPi4 — too slow for real-time
+  notes:
+    - "Run BenchmarkEngine with tdp_watts: 6.0 to collect energy estimates."
+    - "Disable SWAP to get accurate peak_memory_mb readings."
+    - "Consider ONNX export for 2–3x speedup on ARM without GPU."

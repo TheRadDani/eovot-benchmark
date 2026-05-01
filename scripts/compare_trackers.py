@@ -47,8 +47,11 @@ from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
 from eovot.datasets.lasot import LaSOTDataset
+from eovot.profiling.device_profile import DEVICE_PRESETS, DeployabilityChecker
 from eovot.reporting.reporter import BenchmarkReporter
+from eovot.trackers.csrt import CSRTTracker
 from eovot.trackers.kcf import KCFTracker
+from eovot.trackers.median_flow import MedianFlowTracker
 from eovot.trackers.mosse import MOSSETracker
 
 # ---------------------------------------------------------------------------
@@ -58,6 +61,8 @@ from eovot.trackers.mosse import MOSSETracker
 TRACKER_REGISTRY = {
     "MOSSE": MOSSETracker,
     "KCF": KCFTracker,
+    "CSRT": CSRTTracker,
+    "MedianFlow": MedianFlowTracker,
 }
 
 DATASET_REGISTRY = {
@@ -133,13 +138,25 @@ def main() -> None:
             "Example: 6.0 for Raspberry Pi 4, 15.0 for a laptop CPU."
         ),
     )
+    parser.add_argument(
+        "--device",
+        default=None,
+        choices=list(DEVICE_PRESETS),
+        metavar="DEVICE",
+        help=(
+            "Run a deployability check against this device profile after benchmarking. "
+            f"Choices: {list(DEVICE_PRESETS)}"
+        ),
+    )
     args = parser.parse_args()
 
     dataset_name = args.dataset_name or args.dataset_loader
     reporter = BenchmarkReporter(output_dir=args.output_dir)
-    engine = BenchmarkEngine(verbose=True)
+    engine = BenchmarkEngine(verbose=True, tdp_watts=args.tdp_watts)
+    checker = DeployabilityChecker() if args.device else None
 
     all_results = []
+    raw_results = []  # BenchmarkResult objects needed for deployability check
 
     for tracker_name in args.trackers:
         print(f"\n{'=' * 60}")
@@ -147,12 +164,9 @@ def main() -> None:
         print(f"{'=' * 60}")
 
         tracker = TRACKER_REGISTRY[tracker_name]()
-        dataset = _build_dataset(
-            args.dataset_loader, args.dataset_root, args.split, args.max_sequences
-        )
 
         dataset_cls = DATASET_REGISTRY[args.dataset_loader]
-        if args.dataset_loader == "GOT10kDataset":
+        if args.dataset_loader in ("GOT10kDataset", "LaSOTDataset"):
             dataset = dataset_cls(
                 root=args.dataset_root,
                 split=args.split,
@@ -177,6 +191,13 @@ def main() -> None:
             print(f"  [{fmt.upper()}] saved → {path}")
 
         all_results.append(result_dict)
+        raw_results.append(result)
+
+        # Per-tracker deployability report
+        if checker is not None and args.device:
+            profile = DEVICE_PRESETS[args.device]
+            report = checker.check(result, profile)
+            print(f"\n{report}")
 
     # -----------------------------------------------------------------------
     # Comparison table (only meaningful with 2+ trackers)
@@ -185,6 +206,19 @@ def main() -> None:
         cmp_path = reporter.save_comparison(all_results, name=f"comparison-{dataset_name}")
         print(f"\n[COMPARISON TABLE] saved → {cmp_path}")
         print("\n" + reporter.comparison_table(all_results))
+
+    # -----------------------------------------------------------------------
+    # Cross-tracker deployability summary
+    # -----------------------------------------------------------------------
+    if checker is not None and args.device and len(raw_results) > 1:
+        profile = DEVICE_PRESETS[args.device]
+        print(f"\n{'=' * 60}")
+        print(f"  Deployability Summary for {profile.name}")
+        print(f"{'=' * 60}")
+        for r in raw_results:
+            rpt = checker.check(r, profile)
+            verdict = "OK" if rpt.deployable else "FAIL"
+            print(f"  [{verdict}]  {r.tracker_name:<16s}  FPS={r.mean_fps:.1f}  mem={r.peak_memory_mb:.0f} MB")
 
 
 if __name__ == "__main__":
