@@ -1,0 +1,75 @@
+# Hardware deployment profiles for EOVOT Edge Deployment Score (EDS).
+#
+# Each profile defines:
+#   description   — Human-readable device name and power mode
+#   target_fps    — Minimum FPS required for real-time deployment
+#   max_memory_mb — Maximum peak RSS memory allowed (MB)
+#   tdp_watts     — CPU/SoC Thermal Design Power for energy estimation
+#   weights       — EDS axis weights (must sum to 1.0)
+#     accuracy    — Mean IoU (higher is better)
+#     fps         — Throughput (higher is better)
+#     memory      — Peak RSS (lower is better, normalised inversely)
+#     energy      — Energy per frame mJ (lower is better, normalised inversely)
+#
+# Usage with rank_for_edge.py:
+#   python scripts/rank_for_edge.py --results-dir results/ --profile raspberry_pi_4
+
+profiles:
+
+  raspberry_pi_4:
+    description: "Raspberry Pi 4 (Cortex-A72 quad-core, up to 15 W TDP)"
+    target_fps: 25.0
+    max_memory_mb: 512.0
+    tdp_watts: 15.0
+    weights:
+      accuracy: 0.35
+      fps: 0.35
+      memory: 0.20
+      energy: 0.10
+
+  jetson_nano:
+    description: "NVIDIA Jetson Nano (Cortex-A57 + Maxwell GPU, 10 W mode)"
+    target_fps: 30.0
+    max_memory_mb: 1024.0
+    tdp_watts: 10.0
+    weights:
+      accuracy: 0.40
+      fps: 0.30
+      memory: 0.15
+      energy: 0.15
+
+  laptop_cpu:
+    description: "Mid-range laptop CPU (15–45 W TDP, no discrete GPU)"
+    target_fps: 60.0
+    max_memory_mb: 4096.0
+    tdp_watts: 45.0
+    weights:
+      accuracy: 0.50
+      fps: 0.25
+      memory: 0.15
+      energy: 0.10
+
+  desktop_gpu:
+    description: "Desktop GPU workstation (high compute, 250 W TDP)"
+    target_fps: 120.0
+    max_memory_mb: 8192.0
+    tdp_watts: 250.0
+    weights:
+      accuracy: 0.70
+      fps: 0.15
+      memory: 0.10
+      energy: 0.05
+
+# --- Custom profile template ---
+# Uncomment and fill in to define your own hardware target.
+#
+# my_device:
+#   description: "My custom edge device"
+#   target_fps: 20.0
+#   max_memory_mb: 256.0
+#   tdp_watts: 5.0
+#   weights:
+#     accuracy: 0.40
+#     fps: 0.30
+#     memory: 0.20
+#     energy: 0.10
