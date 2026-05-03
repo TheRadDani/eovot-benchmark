@@ -279,3 +279,226 @@ def plot_tracker_comparison(
         print(f"[plot] Tracker comparison saved → {output_path}")
     else:
         plt.show()
+
+
+def plot_efficiency_scatter(
+    results: List[Dict[str, Any]],
+    pareto_names: Optional[List[str]] = None,
+    output_path: Optional[str] = None,
+    title: str = "Accuracy vs. Throughput",
+    size_metric: Optional[str] = "peak_memory_mb",
+) -> None:
+    """Scatter plot of mIoU (accuracy) vs. FPS (throughput) across trackers.
+
+    Pareto-optimal trackers are highlighted with a star marker; the Pareto
+    frontier is drawn as a step line.  Optionally, marker area is scaled by
+    ``size_metric`` (default: peak memory) to convey a third dimension.
+
+    This is the core edge-deployment decision chart: trackers in the
+    upper-right region are both accurate and fast; those on the frontier
+    represent the best achievable accuracy at each throughput level.
+
+    Args:
+        results:      List of EOVOT result dicts (one per tracker).
+        pareto_names: Pre-computed Pareto-frontier tracker names.  When
+                      ``None``, the frontier is computed automatically using
+                      :class:`~eovot.metrics.efficiency.EfficiencyAnalyzer`.
+        output_path:  Save path.  Interactive display when ``None``.
+        title:        Figure title string.
+        size_metric:  Summary key used to scale marker area.  Pass ``None``
+                      to use a uniform marker size.
+
+    Example::
+
+        from eovot.visualization.plots import plot_efficiency_scatter
+        plot_efficiency_scatter(results, output_path="efficiency.png")
+    """
+    plt = _get_matplotlib()
+    import matplotlib.patches as mpatches
+
+    if pareto_names is None:
+        from ..metrics.efficiency import EfficiencyAnalyzer
+        pareto_names = EfficiencyAnalyzer().pareto_frontier(results)
+
+    summaries = [r.get("summary", {}) for r in results]
+    names = [s.get("tracker", f"T{i}") for i, s in enumerate(summaries)]
+    ious = [float(s.get("mean_iou", 0.0)) for s in summaries]
+    fps_vals = [float(s.get("mean_fps", 0.0)) for s in summaries]
+
+    # Marker sizes scaled by size_metric (area in points²).
+    if size_metric is not None:
+        raw_sizes = np.array([float(s.get(size_metric, 1.0)) for s in summaries])
+        lo, hi = raw_sizes.min(), raw_sizes.max()
+        if hi > lo:
+            norm_sizes = (raw_sizes - lo) / (hi - lo)
+        else:
+            norm_sizes = np.ones(len(raw_sizes)) * 0.5
+        marker_areas = 80 + norm_sizes * 400  # scale to [80, 480] pt²
+    else:
+        marker_areas = np.full(len(names), 150.0)
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+
+    pareto_set = set(pareto_names)
+    non_pareto_plotted = False
+    pareto_plotted = False
+
+    for i, (name, iou_val, fps_val, area) in enumerate(
+        zip(names, ious, fps_vals, marker_areas)
+    ):
+        if name in pareto_set:
+            ax.scatter(
+                fps_val, iou_val,
+                s=area, marker="*", zorder=5,
+                label=f"{name} (Pareto)" if not pareto_plotted else None,
+                edgecolors="black", linewidths=0.7,
+            )
+            pareto_plotted = True
+        else:
+            ax.scatter(
+                fps_val, iou_val,
+                s=area, marker="o", alpha=0.8, zorder=4,
+                label=None if non_pareto_plotted else "Other trackers",
+                edgecolors="black", linewidths=0.5,
+            )
+            non_pareto_plotted = True
+        ax.annotate(
+            name, (fps_val, iou_val),
+            textcoords="offset points", xytext=(6, 4),
+            fontsize=9,
+        )
+
+    # Draw the Pareto frontier as a step function from high FPS to high IoU.
+    if len(pareto_names) > 1:
+        pareto_pts = sorted(
+            [
+                (float(summaries[names.index(n)].get("mean_fps", 0.0)),
+                 float(summaries[names.index(n)].get("mean_iou", 0.0)))
+                for n in pareto_names
+                if n in names
+            ],
+            key=lambda p: p[0],
+        )
+        px, py = zip(*pareto_pts)
+        ax.step(px, py, where="post", linestyle="--", linewidth=1.5,
+                color="gray", alpha=0.7, label="Pareto frontier", zorder=3)
+
+    if size_metric is not None:
+        note = f"Marker area ∝ {size_metric.replace('_', ' ')}"
+        ax.annotate(note, xy=(0.02, 0.02), xycoords="axes fraction",
+                    fontsize=8, color="gray")
+
+    ax.set_xlabel("Throughput (FPS)", fontsize=12)
+    ax.set_ylabel("Accuracy (mIoU)", fontsize=12)
+    ax.set_title(title, fontsize=14)
+    ax.legend(fontsize=10, loc="lower right")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+
+    if output_path:
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"[plot] Efficiency scatter saved → {output_path}")
+    else:
+        plt.show()
+
+
+def plot_radar_chart(
+    results: List[Dict[str, Any]],
+    metrics: Optional[List[str]] = None,
+    output_path: Optional[str] = None,
+    title: str = "Tracker Profile (Radar)",
+) -> None:
+    """Multi-metric radar (spider) chart for holistic tracker comparison.
+
+    Each axis represents one metric, normalised to ``[0, 1]`` across the
+    compared trackers.  A larger filled area indicates a more balanced tracker.
+    For efficiency metrics (memory, latency, energy) the values are inverted
+    so that a larger polygon always means better performance.
+
+    Args:
+        results: List of EOVOT result dicts (one per tracker).
+        metrics: List of summary dict keys to plot.  Defaults to
+            ``["mean_iou", "mean_fps", "peak_memory_mb", "mean_latency_ms"]``.
+            Keys ending in ``_mb`` or ``_ms`` or ``_j`` are treated as
+            *lower-is-better* and inverted automatically.
+        output_path: Save path.  Interactive display when ``None``.
+        title: Figure title string.
+
+    Example::
+
+        from eovot.visualization.plots import plot_radar_chart
+        plot_radar_chart(results, output_path="radar.png")
+    """
+    plt = _get_matplotlib()
+    import matplotlib.patches as mpatches
+
+    if metrics is None:
+        metrics = ["mean_iou", "mean_fps", "peak_memory_mb", "mean_latency_ms"]
+
+    # Keys where lower values are better — invert the normalised score.
+    lower_is_better = {"peak_memory_mb", "mean_latency_ms", "mean_energy_per_frame_mj",
+                       "total_energy_j"}
+
+    summaries = [r.get("summary", {}) for r in results]
+    names = [s.get("tracker", f"T{i}") for i, s in enumerate(summaries)]
+
+    # Collect raw values and normalise per metric.
+    raw: Dict[str, List[float]] = {}
+    for m in metrics:
+        raw[m] = [float(s.get(m, 0.0)) for s in summaries]
+
+    norm: Dict[str, np.ndarray] = {}
+    for m, vals in raw.items():
+        arr = np.array(vals, dtype=np.float64)
+        lo, hi = arr.min(), arr.max()
+        if hi > lo:
+            n_arr = (arr - lo) / (hi - lo)
+        else:
+            n_arr = np.ones(len(arr)) * 0.5
+        if m in lower_is_better:
+            n_arr = 1.0 - n_arr  # invert: smaller memory/latency → higher score
+        norm[m] = n_arr
+
+    n_metrics = len(metrics)
+    angles = np.linspace(0, 2 * np.pi, n_metrics, endpoint=False).tolist()
+    angles += angles[:1]  # close the polygon
+
+    fig, ax = plt.subplots(figsize=(7, 7), subplot_kw={"polar": True})
+    color_cycle = plt.rcParams.get("axes.prop_cycle", None)
+    colors = (
+        color_cycle.by_key()["color"]
+        if color_cycle is not None
+        else ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
+    )
+
+    for i, (name, summary) in enumerate(zip(names, summaries)):
+        values = [float(norm[m][i]) for m in metrics]
+        values += values[:1]  # close the polygon
+        color = colors[i % len(colors)]
+        ax.plot(angles, values, linewidth=2, linestyle="solid", color=color, label=name)
+        ax.fill(angles, values, alpha=0.12, color=color)
+
+    # Axis labels: replace underscores and add (↓) for lower-is-better.
+    axis_labels = []
+    for m in metrics:
+        label = m.replace("_", " ")
+        if m in lower_is_better:
+            label += "\n(↓ better, inverted)"
+        axis_labels.append(label)
+
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(axis_labels, fontsize=9)
+    ax.set_ylim(0.0, 1.0)
+    ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+    ax.set_yticklabels(["0.25", "0.5", "0.75", "1.0"], fontsize=7, color="grey")
+    ax.set_title(title, fontsize=14, pad=20)
+    ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1), fontsize=10)
+    fig.tight_layout()
+
+    if output_path:
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"[plot] Radar chart saved → {output_path}")
+    else:
+        plt.show()
