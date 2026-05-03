@@ -66,8 +66,11 @@ class BenchmarkReporter:
     def save_csv(self, result: Dict[str, Any], name: str) -> Path:
         """Write per-sequence metrics to a CSV file.
 
-        Columns: ``sequence_name``, ``mean_iou``, ``precision_score``,
-        ``fps``, ``mean_latency_ms``.
+        Columns: ``sequence_name``, ``mean_iou``, ``normalized_precision_at_20``,
+        ``fps``, ``mean_latency_ms``, ``peak_memory_mb``.
+
+        ``normalized_precision_at_20`` is written as an empty string when not
+        available (e.g. older result dicts that pre-date this metric).
 
         Args:
             result: Output dict from :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
@@ -81,17 +84,26 @@ class BenchmarkReporter:
         if not sequences:
             return path
 
-        fieldnames = ["sequence_name", "mean_iou", "precision_score", "fps", "mean_latency_ms"]
+        fieldnames = [
+            "sequence_name",
+            "mean_iou",
+            "normalized_precision_at_20",
+            "fps",
+            "mean_latency_ms",
+            "peak_memory_mb",
+        ]
         with open(path, "w", newline="") as fh:
             writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
             writer.writeheader()
             for seq in sequences:
+                np20 = seq.get("normalized_precision_at_20")
                 writer.writerow({
                     "sequence_name": seq.get("sequence_name", ""),
                     "mean_iou": f"{seq.get('mean_iou', 0.0):.4f}",
-                    "precision_score": f"{seq.get('precision_score', 0.0):.4f}",
+                    "normalized_precision_at_20": f"{np20:.4f}" if np20 is not None else "",
                     "fps": f"{seq.get('fps', 0.0):.2f}",
                     "mean_latency_ms": f"{seq.get('mean_latency_ms', 0.0):.3f}",
+                    "peak_memory_mb": f"{seq.get('peak_memory_mb', 0.0):.2f}",
                 })
         return path
 

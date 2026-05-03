@@ -209,3 +209,38 @@ class TestBenchmarkEngine:
         result = self.engine.run(tracker, self.dataset, dataset_name="Synthetic")
         assert result.mean_center_distance is not None
         assert result.mean_center_distance > 0.0
+
+    def test_sequence_result_stores_normalized_center_distances(self):
+        """Engine must store per-frame normalised centre-distances on each SequenceResult."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        for sr in result.sequence_results:
+            assert sr.normalized_center_distances is not None
+            assert sr.normalized_center_distances.shape == (NUM_FRAMES,)
+
+    def test_perfect_tracker_zero_normalized_center_distance(self):
+        """Perfect tracker → normalised distance = 0 for all frames."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        for sr in result.sequence_results:
+            valid = sr.normalized_center_distances[
+                np.isfinite(sr.normalized_center_distances)
+            ]
+            np.testing.assert_allclose(valid, 0.0, atol=1e-9)
+
+    def test_normalized_precision_at_20_perfect_tracker(self):
+        """Perfect tracker → NP@0.20 = 1.0 per sequence."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        for sr in result.sequence_results:
+            assert sr.normalized_precision_at_20 == pytest.approx(1.0)
+
+    def test_mean_normalized_precision_in_benchmark_result(self):
+        """BenchmarkResult must expose mean_normalized_precision_at_20."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        np20 = result.mean_normalized_precision_at_20
+        assert np20 is not None
+        assert np20 == pytest.approx(1.0)
+
+    def test_summary_includes_normalized_precision(self):
+        """summary() should include mean_normalized_precision_at_20."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        s = result.summary()
+        assert "mean_normalized_precision_at_20" in s
