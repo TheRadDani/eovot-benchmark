@@ -66,6 +66,32 @@ def center_distance(pred: BBox, gt: BBox) -> float:
     return float(np.sqrt(dx * dx + dy * dy))
 
 
+def normalized_center_distance(pred: BBox, gt: BBox) -> float:
+    """Centre distance normalised by the square root of the GT box area.
+
+    Dividing by ``sqrt(gt_w * gt_h)`` makes the distance scale-invariant:
+    a distance of 0.2 means the centres are 20 % of the target diagonal
+    apart, regardless of whether the target is 10 px or 1000 px wide.
+    This normalised distance is the basis of the **Normalised Precision**
+    (NP) metric used in LaSOT and TrackingNet.
+
+    Args:
+        pred: Predicted box ``(x, y, w, h)``.
+        gt:   Ground-truth box ``(x, y, w, h)``.
+
+    Returns:
+        Normalised distance in ``[0, ∞)``.  Returns ``float('inf')`` when
+        the GT box has zero area (degenerate annotation).
+    """
+    px, py, pw, ph = pred
+    gx, gy, gw, gh = gt
+    if gw <= 0 or gh <= 0:
+        return float("inf")
+    dx = (px + pw / 2) - (gx + gw / 2)
+    dy = (py + ph / 2) - (gy + gh / 2)
+    return float(np.sqrt(dx * dx + dy * dy) / np.sqrt(gw * gh))
+
+
 @dataclass
 class AccuracyMetrics:
     """Scalar accuracy summary for a tracker on a dataset or sequence."""
@@ -79,12 +105,29 @@ class AccuracyMetrics:
     precision_auc: float
     """Normalised AUC of the Precision Curve (distance thresholds 0 → 50 px)."""
 
+    normalized_precision_auc: float = 0.0
+    """AUC of the Normalised Precision Curve (NP thresholds 0 → 0.5).
+
+    Normalised Precision uses centre distances divided by ``sqrt(gt_w * gt_h)``
+    so the metric is scale-invariant.  Used in LaSOT and TrackingNet papers.
+    """
+
+    normalized_precision_at_20: float = 0.0
+    """Normalised Precision at threshold 0.20 — the canonical LaSOT NP scalar.
+
+    Equals the fraction of frames whose normalised centre distance is below 0.20.
+    A value of 1.0 means every predicted centre is within 20 % of the target
+    diagonal of the ground-truth centre.
+    """
+
     def __str__(self) -> str:
         return (
             f"AccuracyMetrics("
             f"mIoU={self.mean_iou:.4f}, "
             f"success_AUC={self.success_auc:.4f}, "
-            f"precision_AUC={self.precision_auc:.4f})"
+            f"precision_AUC={self.precision_auc:.4f}, "
+            f"NP_AUC={self.normalized_precision_auc:.4f}, "
+            f"NP@0.20={self.normalized_precision_at_20:.4f})"
         )
 
 
@@ -162,37 +205,84 @@ class MetricsEngine:
         rates = np.array([(dists < t).mean() for t in thresholds])
         return thresholds, rates
 
+    def normalized_precision_curve(
+        self,
+        preds: np.ndarray,
+        gts: np.ndarray,
+        thresholds: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Normalised Precision (NP) curve used in LaSOT and TrackingNet.
+
+        Instead of raw pixel distances, each frame's centre distance is divided
+        by ``sqrt(gt_w * gt_h)`` before thresholding.  This makes the metric
+        size-invariant: a small object and a large object are evaluated on the
+        same relative scale.
+
+        Args:
+            preds:      ``(N, 4)`` predicted boxes ``(x, y, w, h)``.
+            gts:        ``(N, 4)`` ground-truth boxes ``(x, y, w, h)``.
+            thresholds: Normalised-distance thresholds (default: 0 … 0.5,
+                        51 equally-spaced points).
+
+        Returns:
+            ``(thresholds, np_rates)`` — both shape ``(T,)``.  Frames with
+            a zero-area GT box are excluded from the rate calculation.
+        """
+        if thresholds is None:
+            thresholds = np.linspace(0.0, 0.5, 51)
+        n = min(len(preds), len(gts))
+        norm_dists = np.array(
+            [
+                normalized_center_distance(tuple(preds[i]), tuple(gts[i]))  # type: ignore[arg-type]
+                for i in range(n)
+            ]
+        )
+        # Exclude degenerate GT boxes (inf distances) from the rate.
+        valid = np.isfinite(norm_dists)
+        if valid.sum() == 0:
+            return thresholds, np.zeros_like(thresholds)
+        norm_dists_valid = norm_dists[valid]
+        rates = np.array([(norm_dists_valid < t).mean() for t in thresholds])
+        return thresholds, rates
+
     def compute_all(
         self,
         preds: np.ndarray,
         gts: np.ndarray,
     ) -> AccuracyMetrics:
-        """Compute mean IoU, success AUC, and precision AUC in one call.
+        """Compute mean IoU, success AUC, precision AUC, and normalised precision in one call.
 
         Args:
             preds: ``(N, 4)`` predicted boxes.
             gts:   ``(N, 4)`` ground-truth boxes.
 
         Returns:
-            :class:`AccuracyMetrics` with all scalar summaries populated.
+            :class:`AccuracyMetrics` with all scalar summaries populated,
+            including :attr:`~AccuracyMetrics.normalized_precision_auc` and
+            :attr:`~AccuracyMetrics.normalized_precision_at_20`.
         """
         ious = self.batch_iou(preds, gts)
 
         # np.trapezoid was introduced in NumPy 2.0; np.trapz was removed in 2.0.
-        _trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz  # type: ignore[attr-defined]
+        try:
+            _trapz = np.trapezoid  # type: ignore[attr-defined]  # numpy ≥ 2.0
+        except AttributeError:
+            _trapz = np.trapz  # type: ignore[attr-defined]  # numpy < 2.0
 
         thr_iou, sr = self.success_curve(ious)
-        try:
-            _trapz = np.trapezoid  # numpy ≥ 2.0
-        except AttributeError:
-            _trapz = np.trapz  # numpy < 2.0
         success_auc = float(_trapz(sr, thr_iou))
 
         thr_dist, pr = self.precision_curve(preds, gts)
         prec_auc = float(_trapz(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
 
+        thr_np, npr = self.normalized_precision_curve(preds, gts)
+        np_auc = float(_trapz(npr, thr_np) / thr_np[-1]) if thr_np[-1] > 0 else 0.0
+        np_at_20 = float(np.interp(0.20, thr_np, npr))
+
         return AccuracyMetrics(
             mean_iou=float(ious.mean()),
             success_auc=success_auc,
             precision_auc=prec_auc,
+            normalized_precision_auc=np_auc,
+            normalized_precision_at_20=np_at_20,
         )
