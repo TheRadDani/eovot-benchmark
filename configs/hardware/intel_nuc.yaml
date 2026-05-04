@@ -1,0 +1,13 @@
+# Hardware profile: Intel NUC with Core i5 processor
+# Modelled after Intel NUC11PAHi5
+name: "Intel NUC (Core i5)"
+cpu_tdp_watts: 28.0
+ram_mb: 16384
+cpu_cores: 4
+cpu_freq_ghz: 3.6
+has_gpu: false
+gpu_tdp_watts: 0.0
+target_fps: 60.0
+max_latency_ms: 16.7
+max_memory_mb: 2048.0
+description: "Intel Core i5 NUC. Mid-range edge compute platform."
