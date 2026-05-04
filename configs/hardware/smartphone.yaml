@@ -1,0 +1,13 @@
+# Hardware profile: Representative mid-range smartphone ARM SoC
+# Modelled after Qualcomm Snapdragon 7 Gen 1 class devices
+name: "Smartphone ARM SoC"
+cpu_tdp_watts: 4.0
+ram_mb: 4096
+cpu_cores: 8
+cpu_freq_ghz: 2.4
+has_gpu: false
+gpu_tdp_watts: 0.0
+target_fps: 24.0
+max_latency_ms: 41.7
+max_memory_mb: 256.0
+description: "Modern smartphone SoC (e.g. Snapdragon 7 Gen 1). Mobile deployment target."

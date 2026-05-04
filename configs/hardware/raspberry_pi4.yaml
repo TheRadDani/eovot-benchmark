@@ -1,0 +1,13 @@
+# Hardware profile: Raspberry Pi 4 (4 GB variant)
+# Source: https://www.raspberrypi.com/products/raspberry-pi-4-model-b/specifications/
+name: "Raspberry Pi 4 (4 GB)"
+cpu_tdp_watts: 6.0
+ram_mb: 4096
+cpu_cores: 4
+cpu_freq_ghz: 1.5
+has_gpu: false
+gpu_tdp_watts: 0.0
+target_fps: 15.0
+max_latency_ms: 66.7
+max_memory_mb: 512.0
+description: "ARM Cortex-A72, quad-core 1.5 GHz. Most common IoT / edge device."

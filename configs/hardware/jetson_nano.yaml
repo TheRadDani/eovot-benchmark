@@ -1,0 +1,13 @@
+# Hardware profile: NVIDIA Jetson Nano Developer Kit
+# Source: https://developer.nvidia.com/embedded/jetson-nano
+name: "NVIDIA Jetson Nano"
+cpu_tdp_watts: 10.0
+ram_mb: 4096
+cpu_cores: 4
+cpu_freq_ghz: 1.43
+has_gpu: true
+gpu_tdp_watts: 5.0
+target_fps: 30.0
+max_latency_ms: 33.3
+max_memory_mb: 1024.0
+description: "ARM Cortex-A57 + 128 Maxwell CUDA cores. Entry-level embedded GPU."
