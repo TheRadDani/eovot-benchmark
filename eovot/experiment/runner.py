@@ -37,6 +37,16 @@ Config schema::
       - name: KCF
         params:
           learning_rate: 0.125
+
+    # Optional: edge-score config for hardware-aware ranking
+    edge_score:
+      target_fps: 30.0
+      memory_budget_mb: 512.0
+      energy_budget_mj: null   # set to a float when tdp_watts is configured
+      w_accuracy: 0.40
+      w_speed: 0.30
+      w_memory: 0.20
+      w_energy: 0.10
 """
 
 from __future__ import annotations
@@ -47,6 +57,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..benchmark.engine import BenchmarkEngine
+from ..metrics.efficiency import EdgeScoreConfig, edge_score_leaderboard_md
 from ..reporting.reporter import BenchmarkReporter
 from .snapshot import ReproducibilitySnapshot
 
@@ -98,6 +109,21 @@ class ExperimentRunner:
         seed = exp_cfg.get("seed", None)
         tdp_watts = exp_cfg.get("tdp_watts", None)
 
+        edge_cfg_raw = config.get("edge_score", {}) or {}
+        edge_score_config = EdgeScoreConfig(
+            target_fps=float(edge_cfg_raw.get("target_fps", 30.0)),
+            memory_budget_mb=float(edge_cfg_raw.get("memory_budget_mb", 512.0)),
+            energy_budget_mj=(
+                float(edge_cfg_raw["energy_budget_mj"])
+                if edge_cfg_raw.get("energy_budget_mj") is not None
+                else None
+            ),
+            w_accuracy=float(edge_cfg_raw.get("w_accuracy", 0.40)),
+            w_speed=float(edge_cfg_raw.get("w_speed", 0.30)),
+            w_memory=float(edge_cfg_raw.get("w_memory", 0.20)),
+            w_energy=float(edge_cfg_raw.get("w_energy", 0.10)),
+        )
+
         snapshot = ReproducibilitySnapshot.capture(seed=seed)
 
         exp_dir = self.output_dir / exp_name
@@ -141,7 +167,7 @@ class ExperimentRunner:
             reporter.save_all(result_dict, name=f"{tracker_name}-{dataset_name}")
             all_results.append(result_dict)
 
-        leaderboard = self._build_leaderboard(all_results)
+        leaderboard = self._build_leaderboard(all_results, edge_score_config)
         leaderboard_path = exp_dir / "leaderboard.md"
         leaderboard_path.write_text(leaderboard, encoding="utf-8")
 
@@ -170,15 +196,24 @@ class ExperimentRunner:
     # Leaderboard generation
     # ------------------------------------------------------------------
 
-    def _build_leaderboard(self, results: List[Dict]) -> str:
-        """Build a Markdown leaderboard table ranked by mIoU (descending).
+    def _build_leaderboard(
+        self,
+        results: List[Dict],
+        edge_config: Optional[EdgeScoreConfig] = None,
+    ) -> str:
+        """Build a Markdown leaderboard with mIoU ranking and edge-score section.
 
         Args:
             results: List of result dicts from
                 :meth:`~eovot.benchmark.engine.BenchmarkResult.to_dict`.
+            edge_config: :class:`~eovot.metrics.efficiency.EdgeScoreConfig`
+                for the hardware-aware ranking section.  Defaults to
+                ``EdgeScoreConfig()`` when ``None``.
 
         Returns:
             Multi-line Markdown string ready for writing to a ``.md`` file.
+            Contains two sections: accuracy-only ranking (mIoU) followed by
+            the composite edge-score ranking.
         """
         if not results:
             return "No results to display.\n"
@@ -201,6 +236,7 @@ class ExperimentRunner:
 
         lines = [
             "# EOVOT Experiment Leaderboard\n",
+            "## Accuracy Ranking (mIoU)\n",
             "| Rank | Tracker | Dataset | mIoU | FPS | Mem (MB) | Sequences |",
             "|------|---------|---------|-----:|----:|---------:|----------:|",
         ]
@@ -211,6 +247,16 @@ class ExperimentRunner:
                 f"| {row['mem_mb']:.1f} | {row['n_seq']} |"
             )
         lines.append("")
+
+        # Append the hardware-aware edge-score section.
+        lines.append(
+            edge_score_leaderboard_md(
+                results,
+                config=edge_config,
+                title="Edge-Score Ranking (accuracy + speed + memory)",
+            )
+        )
+
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
