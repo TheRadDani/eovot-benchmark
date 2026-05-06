@@ -38,3 +38,26 @@ trackers:
 
   - name: MedianFlow
     params: {}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Edge-Score Configuration
+#
+# Controls the hardware-aware composite ranking produced alongside the
+# standard mIoU leaderboard.  Tune these values to match your target device.
+#
+#   target_fps      — FPS above which speed component is capped at 1.0.
+#                     30 fps = real-time video; 15 fps = IoT / low-power.
+#   memory_budget_mb — Maximum acceptable RSS memory in MiB.
+#                     256 MB → Raspberry Pi 4 (1 GB); 512 MB → Jetson Nano.
+#   energy_budget_mj — Per-frame energy budget in mJ. Only meaningful when
+#                     tdp_watts is set above. null disables the energy column.
+#   w_*             — Relative weights (automatically normalised to sum to 1).
+# ─────────────────────────────────────────────────────────────────────────────
+edge_score:
+  target_fps: 30.0
+  memory_budget_mb: 512.0
+  energy_budget_mj: null     # set to e.g. 5.0 when tdp_watts is configured
+  w_accuracy: 0.40
+  w_speed: 0.30
+  w_memory: 0.20
+  w_energy: 0.10
