@@ -219,17 +219,51 @@ class ExperimentRunner:
 
     @staticmethod
     def _build_dataset(cfg: Dict):
-        """Instantiate a dataset from a config dict."""
+        """Instantiate a dataset from a config dict.
+
+        Supports ``"SyntheticDataset"`` as a ``loader`` value, dispatching
+        to :meth:`~eovot.datasets.synthetic.SyntheticDataset.quick`,
+        :meth:`~eovot.datasets.synthetic.SyntheticDataset.stress_test`, or
+        :meth:`~eovot.datasets.synthetic.SyntheticDataset.scale_challenge`
+        via a ``preset`` key.  When no ``preset`` is given, ``quick`` is used.
+        """
         from ..datasets.base import OTBDataset
         from ..datasets.got10k import GOT10kDataset
         from ..datasets.lasot import LaSOTDataset
+        from ..datasets.synthetic import SyntheticDataset
+
+        loader_name = cfg.get("loader", "OTBDataset")
+
+        if loader_name == "SyntheticDataset":
+            preset = cfg.get("preset", "quick")
+            common_kwargs: Dict = {}
+            for key in ("n_sequences", "n_frames", "seed"):
+                if key in cfg:
+                    common_kwargs[key] = cfg[key]
+            if "frame_size" in cfg:
+                common_kwargs["frame_size"] = tuple(cfg["frame_size"])
+
+            factory_map = {
+                "quick": SyntheticDataset.quick,
+                "stress_test": SyntheticDataset.stress_test,
+                "scale_challenge": SyntheticDataset.scale_challenge,
+            }
+            if preset not in factory_map:
+                raise ValueError(
+                    f"Unknown SyntheticDataset preset '{preset}'. "
+                    f"Available: {list(factory_map)}"
+                )
+            factory = factory_map[preset]
+            # quick() accepts 'motion'; others do not
+            if preset == "quick" and "motion" in cfg:
+                common_kwargs["motion"] = cfg["motion"]
+            return factory(**common_kwargs)
 
         loaders = {
             "OTBDataset": OTBDataset,
             "GOT10kDataset": GOT10kDataset,
             "LaSOTDataset": LaSOTDataset,
         }
-        loader_name = cfg.get("loader", "OTBDataset")
         cls = loaders[loader_name]
         root = cfg["root"]
 
