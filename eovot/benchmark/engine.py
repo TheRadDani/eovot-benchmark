@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from ..datasets.base import BaseDataset, Sequence
-from ..metrics.accuracy import MetricsEngine, center_distance
+from ..metrics.accuracy import AccuracyMetrics, MetricsEngine, center_distance
 from ..profiling.energy import EnergyProfiler, EnergyResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
@@ -23,6 +23,7 @@ class SequenceResult:
     ground_truths: Optional[np.ndarray] = None     # shape (N, 4) — GT boxes aligned to predictions
     center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
     energy: Optional[EnergyResult] = None          # energy estimate; None when TDP not configured
+    accuracy_metrics: Optional[AccuracyMetrics] = None  # full accuracy summary (success/precision AUC)
 
     @property
     def mean_iou(self) -> float:
@@ -57,6 +58,24 @@ class BenchmarkResult:
         if not dists:
             return None
         return float(np.concatenate(dists).mean())
+
+    @property
+    def mean_success_auc(self) -> Optional[float]:
+        """Mean success AUC across all sequences, or None if not computed."""
+        vals = [r.accuracy_metrics.success_auc for r in self.sequence_results if r.accuracy_metrics is not None]
+        return float(np.mean(vals)) if vals else None
+
+    @property
+    def mean_precision_auc(self) -> Optional[float]:
+        """Mean precision AUC (OTB/VOT protocol) across all sequences, or None."""
+        vals = [r.accuracy_metrics.precision_auc for r in self.sequence_results if r.accuracy_metrics is not None]
+        return float(np.mean(vals)) if vals else None
+
+    @property
+    def mean_np_auc(self) -> Optional[float]:
+        """Mean normalized precision AUC (LaSOT protocol) across all sequences, or None."""
+        vals = [r.accuracy_metrics.np_auc for r in self.sequence_results if r.accuracy_metrics is not None]
+        return float(np.mean(vals)) if vals else None
 
     @property
     def mean_fps(self) -> float:
@@ -94,6 +113,15 @@ class BenchmarkResult:
         mcd = self.mean_center_distance
         if mcd is not None:
             d["mean_center_distance_px"] = round(mcd, 3)
+        s_auc = self.mean_success_auc
+        if s_auc is not None:
+            d["mean_success_auc"] = round(s_auc, 4)
+        p_auc = self.mean_precision_auc
+        if p_auc is not None:
+            d["mean_precision_auc"] = round(p_auc, 4)
+        np_auc = self.mean_np_auc
+        if np_auc is not None:
+            d["mean_np_auc"] = round(np_auc, 4)
         e_total = self.total_energy_j
         if e_total is not None:
             d["total_energy_j"] = round(e_total, 4)
@@ -118,6 +146,10 @@ class BenchmarkResult:
                 "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
                 "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
             }
+            if r.accuracy_metrics is not None:
+                entry["success_auc"] = round(r.accuracy_metrics.success_auc, 4)
+                entry["precision_auc"] = round(r.accuracy_metrics.precision_auc, 4)
+                entry["np_auc"] = round(r.accuracy_metrics.np_auc, 4)
             if r.energy is not None:
                 entry["energy_j"] = round(r.energy.total_energy_j, 6)
                 entry["energy_per_frame_mj"] = round(r.energy.energy_per_frame_mj, 4)
@@ -230,6 +262,9 @@ class BenchmarkEngine:
             dtype=np.float64,
         )
 
+        # Compute full accuracy summary (success AUC, precision AUC, NP AUC).
+        accuracy_metrics = self._metrics.compute_all(preds_eval, gt_eval)
+
         energy: Optional[EnergyResult] = None
         if self._energy_profiler is not None:
             try:
@@ -245,4 +280,5 @@ class BenchmarkEngine:
             ground_truths=gt_eval,
             center_distances=dists,
             energy=energy,
+            accuracy_metrics=accuracy_metrics,
         )

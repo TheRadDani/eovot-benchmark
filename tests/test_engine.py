@@ -209,3 +209,42 @@ class TestBenchmarkEngine:
         result = self.engine.run(tracker, self.dataset, dataset_name="Synthetic")
         assert result.mean_center_distance is not None
         assert result.mean_center_distance > 0.0
+
+    def test_accuracy_metrics_stored_on_sequence_result(self):
+        """Each SequenceResult must carry an AccuracyMetrics object."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        for sr in result.sequence_results:
+            assert sr.accuracy_metrics is not None
+
+    def test_perfect_tracker_success_auc_is_one(self):
+        """A perfect constant tracker should achieve success_auc = 1.0."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        assert result.mean_success_auc is not None
+        assert result.mean_success_auc == pytest.approx(1.0, abs=0.01)
+
+    def test_perfect_tracker_np_auc_is_one(self):
+        """A perfect constant tracker should achieve np_auc close to 1.0.
+
+        The strict ``<`` check at threshold=0.0 gives a rate of 0.0 for
+        exact predictions, so the AUC is marginally below 1.0 by design.
+        """
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        assert result.mean_np_auc is not None
+        assert result.mean_np_auc == pytest.approx(1.0, abs=0.02)
+
+    def test_summary_includes_accuracy_aucs(self):
+        """summary() must include mean_success_auc, mean_precision_auc, mean_np_auc."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        s = result.summary()
+        assert "mean_success_auc" in s
+        assert "mean_precision_auc" in s
+        assert "mean_np_auc" in s
+
+    def test_to_dict_sequence_includes_accuracy_aucs(self):
+        """to_dict() must include success_auc, precision_auc, np_auc per sequence."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        d = result.to_dict()
+        for seq in d["sequences"]:
+            assert "success_auc" in seq
+            assert "precision_auc" in seq
+            assert "np_auc" in seq

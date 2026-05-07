@@ -191,24 +191,30 @@ class ExperimentRunner:
                     "tracker": s.get("tracker", "?"),
                     "dataset": s.get("dataset", "?"),
                     "mIoU": float(s.get("mean_iou", 0.0)),
+                    "s_auc": s.get("mean_success_auc"),
+                    "p_auc": s.get("mean_precision_auc"),
+                    "np_auc": s.get("mean_np_auc"),
                     "fps": float(s.get("mean_fps", 0.0)),
                     "mem_mb": float(s.get("peak_memory_mb", 0.0)),
                     "n_seq": int(s.get("num_sequences", 0)),
                 }
             )
 
-        rows.sort(key=lambda x: x["mIoU"], reverse=True)
+        rows.sort(key=lambda x: x["s_auc"] if x["s_auc"] is not None else x["mIoU"], reverse=True)
+
+        _fmt = lambda v: f"{v:.4f}" if v is not None else "-"  # noqa: E731
 
         lines = [
             "# EOVOT Experiment Leaderboard\n",
-            "| Rank | Tracker | Dataset | mIoU | FPS | Mem (MB) | Sequences |",
-            "|------|---------|---------|-----:|----:|---------:|----------:|",
+            "| Rank | Tracker | Dataset | mIoU | Succ AUC | Prec AUC | NP AUC | FPS | Mem (MB) | Sequences |",
+            "|------|---------|---------|-----:|---------:|---------:|-------:|----:|---------:|----------:|",
         ]
         for rank, row in enumerate(rows, start=1):
             lines.append(
                 f"| {rank} | {row['tracker']} | {row['dataset']} "
-                f"| {row['mIoU']:.4f} | {row['fps']:.1f} "
-                f"| {row['mem_mb']:.1f} | {row['n_seq']} |"
+                f"| {row['mIoU']:.4f} | {_fmt(row['s_auc'])} "
+                f"| {_fmt(row['p_auc'])} | {_fmt(row['np_auc'])} "
+                f"| {row['fps']:.1f} | {row['mem_mb']:.1f} | {row['n_seq']} |"
             )
         lines.append("")
         return "\n".join(lines)
