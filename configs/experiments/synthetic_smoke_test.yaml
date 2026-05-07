@@ -1,0 +1,56 @@
+# EOVOT smoke-test experiment — no real dataset required.
+#
+# Runs all classical trackers on a programmatically generated synthetic
+# dataset, verifying the full benchmark pipeline (engine → metrics →
+# profiling → reporting → leaderboard) without downloading any real data.
+#
+# Run with:
+#   python scripts/run_experiment.py \
+#       --config configs/experiments/synthetic_smoke_test.yaml
+#
+# Dry-run (print plan, do not execute):
+#   python scripts/run_experiment.py \
+#       --config configs/experiments/synthetic_smoke_test.yaml --dry-run
+#
+# Useful for:
+#   - Local and CI pipeline validation
+#   - Sanity-checking new tracker implementations
+#   - Quick comparative profiling on a controlled, reproducible workload
+
+experiment:
+  name: "synthetic-smoke-test"
+  seed: 42
+  # Uncomment and set to your device TDP (W) to enable CPU energy estimation:
+  # tdp_watts: 15.0   # laptop CPU
+  # tdp_watts:  6.0   # Raspberry Pi 4
+  # tdp_watts: 10.0   # Jetson Nano
+  tdp_watts: null
+
+dataset:
+  loader: SyntheticDataset
+  preset: quick           # quick | stress_test | scale_challenge
+  name: Synthetic
+  n_sequences: 5
+  n_frames: 60
+  frame_size: [240, 320]  # [H, W]
+  motion: sinusoidal      # linear | sinusoidal | random_walk  (quick preset only)
+  seed: 42
+
+trackers:
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+      sigma: 2.0
+
+  - name: KCF
+    params:
+      learning_rate: 0.125
+
+  - name: CSRT
+    params: {}
+
+  - name: MIL
+    params: {}
+
+  - name: MedianFlow
+    params: {}
