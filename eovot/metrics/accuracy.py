@@ -9,6 +9,9 @@ LaSOT benchmarks:
 - **Precision Curve** — fraction of frames whose predicted centre is
   within a pixel-distance threshold of the ground-truth centre,
   swept from 0 to 50 px; AUC at 20 px is the canonical scalar.
+- **Normalized Precision Curve** — like precision but distance is normalized
+  by ``sqrt(gt_w * gt_h)``, making it resolution-independent (LaSOT protocol).
+  Thresholds sweep 0 → 0.5; AUC at 0.20 is the canonical scalar.
 - **AccuracyMetrics** dataclass that bundles all scalars together.
 """
 
@@ -66,6 +69,29 @@ def center_distance(pred: BBox, gt: BBox) -> float:
     return float(np.sqrt(dx * dx + dy * dy))
 
 
+def normalized_center_distance(pred: BBox, gt: BBox) -> float:
+    """Center distance normalized by the square root of the GT box area.
+
+    This is the LaSOT normalized precision metric, which removes the
+    dependence on image resolution and target scale:
+
+        NCD = center_distance(pred, gt) / sqrt(gt_w * gt_h)
+
+    Args:
+        pred: Predicted box ``(x, y, w, h)``.
+        gt:   Ground-truth box ``(x, y, w, h)``.
+
+    Returns:
+        Normalized distance (dimensionless).  Returns 0.0 when the GT
+        box has zero area.
+    """
+    _, _, gw, gh = gt
+    gt_scale = float(np.sqrt(gw * gh))
+    if gt_scale <= 0:
+        return 0.0
+    return center_distance(pred, gt) / gt_scale
+
+
 @dataclass
 class AccuracyMetrics:
     """Scalar accuracy summary for a tracker on a dataset or sequence."""
@@ -79,12 +105,17 @@ class AccuracyMetrics:
     precision_auc: float
     """Normalised AUC of the Precision Curve (distance thresholds 0 → 50 px)."""
 
+    np_auc: float
+    """Normalised AUC of the Normalized Precision Curve (LaSOT protocol,
+    distance thresholds 0 → 0.5 relative to sqrt(gt_w * gt_h))."""
+
     def __str__(self) -> str:
         return (
             f"AccuracyMetrics("
             f"mIoU={self.mean_iou:.4f}, "
             f"success_AUC={self.success_auc:.4f}, "
-            f"precision_AUC={self.precision_auc:.4f})"
+            f"precision_AUC={self.precision_auc:.4f}, "
+            f"np_AUC={self.np_auc:.4f})"
         )
 
 
@@ -162,12 +193,44 @@ class MetricsEngine:
         rates = np.array([(dists < t).mean() for t in thresholds])
         return thresholds, rates
 
+    def normalized_precision_curve(
+        self,
+        preds: np.ndarray,
+        gts: np.ndarray,
+        thresholds: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Normalized precision curve (LaSOT protocol).
+
+        Distances are normalized by ``sqrt(gt_w * gt_h)`` before thresholding,
+        making the metric invariant to image resolution and target scale.
+        Thresholds sweep 0 → 0.5; AUC at threshold 0.20 is the canonical scalar.
+
+        Args:
+            preds:      ``(N, 4)`` predicted boxes.
+            gts:        ``(N, 4)`` ground-truth boxes.
+            thresholds: Normalized distance thresholds (default: 0 … 0.5).
+
+        Returns:
+            ``(thresholds, precision_rates)`` — both shape ``(T,)``.
+        """
+        if thresholds is None:
+            thresholds = np.linspace(0.0, 0.5, 51)
+        n = min(len(preds), len(gts))
+        dists = np.array(
+            [normalized_center_distance(tuple(preds[i]), tuple(gts[i])) for i in range(n)]  # type: ignore[arg-type]
+        )
+        rates = np.array([(dists < t).mean() for t in thresholds])
+        return thresholds, rates
+
     def compute_all(
         self,
         preds: np.ndarray,
         gts: np.ndarray,
     ) -> AccuracyMetrics:
-        """Compute mean IoU, success AUC, and precision AUC in one call.
+        """Compute all scalar accuracy summaries in one call.
+
+        Computes mean IoU, success AUC, precision AUC (OTB/VOT protocol),
+        and normalized precision AUC (LaSOT protocol).
 
         Args:
             preds: ``(N, 4)`` predicted boxes.
@@ -178,21 +241,23 @@ class MetricsEngine:
         """
         ious = self.batch_iou(preds, gts)
 
-        # np.trapezoid was introduced in NumPy 2.0; np.trapz was removed in 2.0.
-        _trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz  # type: ignore[attr-defined]
-
-        thr_iou, sr = self.success_curve(ious)
         try:
             _trapz = np.trapezoid  # numpy ≥ 2.0
         except AttributeError:
             _trapz = np.trapz  # numpy < 2.0
+
+        thr_iou, sr = self.success_curve(ious)
         success_auc = float(_trapz(sr, thr_iou))
 
         thr_dist, pr = self.precision_curve(preds, gts)
         prec_auc = float(_trapz(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
 
+        thr_np, npr = self.normalized_precision_curve(preds, gts)
+        np_auc = float(_trapz(npr, thr_np) / thr_np[-1]) if thr_np[-1] > 0 else 0.0
+
         return AccuracyMetrics(
             mean_iou=float(ious.mean()),
             success_auc=success_auc,
             precision_auc=prec_auc,
+            np_auc=np_auc,
         )

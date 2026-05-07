@@ -141,16 +141,19 @@ class BenchmarkReporter:
             A ``| col | col | ... |`` formatted string (no trailing newline).
         """
         s = result.get("summary", {})
-        tracker = s.get("tracker_name", "?")
-        dataset = s.get("dataset_name", "?")
+        tracker = s.get("tracker", "?")
+        dataset = s.get("dataset", "?")
         mean_iou = s.get("mean_iou", 0.0)
-        mean_prec = s.get("mean_precision", 0.0)
+        s_auc = s.get("mean_success_auc", float("nan"))
+        p_auc = s.get("mean_precision_auc", float("nan"))
+        np_auc = s.get("mean_np_auc", float("nan"))
         fps = s.get("mean_fps", 0.0)
-        lat = s.get("mean_latency_ms", 0.0)
         mem = s.get("peak_memory_mb", 0.0)
+        fmt_or_dash = lambda v: f"{v:.4f}" if v == v else "-"  # noqa: E731
         return (
             f"| {tracker} | {dataset} | {mean_iou:.4f} "
-            f"| {mean_prec:.4f} | {fps:.1f} | {lat:.2f} | {mem:.1f} |"
+            f"| {fmt_or_dash(s_auc)} | {fmt_or_dash(p_auc)} "
+            f"| {fmt_or_dash(np_auc)} | {fps:.1f} | {mem:.1f} |"
         )
 
     @staticmethod
@@ -166,8 +169,8 @@ class BenchmarkReporter:
             A multi-line Markdown string ready to paste into a README or paper.
         """
         header = (
-            "| Tracker | Dataset | mIoU | Precision | FPS | Latency (ms) | Mem (MB) |\n"
-            "|---------|---------|-----:|----------:|----:|-------------:|---------:|\n"
+            "| Tracker | Dataset | mIoU | Succ AUC | Prec AUC | NP AUC | FPS | Mem (MB) |\n"
+            "|---------|---------|-----:|---------:|---------:|-------:|----:|---------:|\n"
         )
         rows = "\n".join(BenchmarkReporter.to_markdown_row(r) for r in results)
         return header + rows
