@@ -1,0 +1,79 @@
+# Adaptive tracking experiment
+#
+# Compares fixed-mode classical trackers against the AdaptiveTracker,
+# which dynamically routes frames to a fast fallback (MOSSE) when the
+# primary tracker (KCF) would exceed the target per-frame budget.
+#
+# This experiment quantifies the accuracy-throughput tradeoff of
+# budget-aware inference — a critical property for edge deployment on
+# Raspberry Pi 4, Jetson Nano, and similar constrained hardware.
+#
+# Usage:
+#   python scripts/run_experiment.py configs/experiments/adaptive_tracking.yaml
+#
+# After the run, compare trackers with the statistical analysis CLI:
+#   python scripts/analyze_results.py results/experiments/adaptive-tracking/*.json \
+#       --pareto --ci --metric iou
+
+experiment:
+  name: "adaptive-tracking-comparison"
+  seed: 42
+  # Set to your device TDP in Watts for energy profiling, e.g.:
+  #   6.0  — Raspberry Pi 4
+  #   10.0 — Jetson Nano
+  #   15.0 — laptop CPU
+  tdp_watts: null
+
+dataset:
+  loader: OTBDataset
+  root: /data/OTB100        # update to your dataset path
+  name: OTB100
+  # Reduce max_sequences for a quick smoke test
+  max_sequences: 10
+
+# ── Baseline trackers ──────────────────────────────────────────────────────
+#
+# These are evaluated with their default operating point and serve as
+# reference points for the Pareto analysis.
+
+trackers:
+  # MOSSE: ~500+ FPS, lower accuracy
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+
+  # KCF: ~150–350 FPS, higher accuracy than MOSSE
+  - name: KCF
+    params:
+      learning_rate: 0.075
+
+  # CSRT: ~30–60 FPS, highest accuracy among classical trackers
+  - name: CSRT
+    params: {}
+
+# ── AdaptiveTracker (programmatic usage) ───────────────────────────────────
+#
+# The AdaptiveTracker is not yet wired into the YAML config factory.
+# Use it directly in Python:
+#
+#   from eovot.trackers.adaptive import AdaptiveTracker
+#   from eovot.trackers.kcf import KCFTracker
+#   from eovot.trackers.mosse import MOSSETracker
+#   from eovot.profiling.budget import ComputeBudget
+#   from eovot.benchmark.engine import BenchmarkEngine
+#   from eovot.datasets.base import OTBDataset
+#
+#   budget  = ComputeBudget(target_fps=30.0, switch_margin=0.10)
+#   tracker = AdaptiveTracker(
+#       primary=KCFTracker(),
+#       fallback=MOSSETracker(),
+#       budget=budget,
+#   )
+#   engine  = BenchmarkEngine(verbose=True)
+#   dataset = OTBDataset(root="/data/OTB100")
+#   result  = engine.run(tracker, dataset, dataset_name="OTB100")
+#   print(tracker.routing_summary)
+#
+# Key metrics to examine:
+#   result.mean_iou             — accuracy under the budget constraint
+#   tracker.routing_summary     — primary_ratio, budget_violation_rate
