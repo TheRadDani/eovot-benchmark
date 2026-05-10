@@ -1,0 +1,38 @@
+# GOT-10k evaluation experiment configuration
+# -----------------------------------------------
+# Evaluates multiple trackers using the full GOT-10k protocol:
+#   - AO  (Average Overlap = mean IoU)
+#   - SR₀.₅  (Success Rate at IoU threshold 0.5)
+#   - SR₀.₇₅ (Success Rate at IoU threshold 0.75)
+#   - NormPrec AUC (scale-invariant normalized precision)
+#
+# Usage:
+#   python scripts/run_experiment.py --config configs/experiments/got10k_eval.yaml
+
+experiment:
+  name: "got10k-protocol-eval"
+  seed: 42
+  tdp_watts: null         # set to device TDP in Watts to enable energy profiling
+
+dataset:
+  loader: "GOT10kDataset"
+  root: "/data/GOT-10k"  # update to your local GOT-10k root
+  name: "GOT-10k"
+  split: "val"
+  max_sequences: null     # null = full val split
+
+trackers:
+  - name: MOSSE
+    params: {}
+
+  - name: KCF
+    params:
+      learning_rate: 0.075
+      padding: 1.5
+      kernel_sigma: 0.5
+
+  - name: CSRT
+    params: {}
+
+  - name: MedianFlow
+    params: {}

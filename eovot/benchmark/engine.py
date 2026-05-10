@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from ..datasets.base import BaseDataset, Sequence
-from ..metrics.accuracy import MetricsEngine, center_distance
+from ..metrics.accuracy import AccuracyMetrics, MetricsEngine, center_distance
 from ..profiling.energy import EnergyProfiler, EnergyResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
@@ -23,6 +23,7 @@ class SequenceResult:
     ground_truths: Optional[np.ndarray] = None     # shape (N, 4) — GT boxes aligned to predictions
     center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
     energy: Optional[EnergyResult] = None          # energy estimate; None when TDP not configured
+    accuracy: Optional[AccuracyMetrics] = None     # full GOT-10k/OTB accuracy metrics
 
     @property
     def mean_iou(self) -> float:
@@ -82,6 +83,30 @@ class BenchmarkResult:
             return None
         return float(np.mean([r.energy.energy_per_frame_mj for r in with_energy]))
 
+    @property
+    def mean_sr_05(self) -> Optional[float]:
+        """Mean GOT-10k SR@0.5 across all sequences."""
+        acc = [r.accuracy for r in self.sequence_results if r.accuracy is not None]
+        if not acc:
+            return None
+        return float(np.mean([a.sr_05 for a in acc]))
+
+    @property
+    def mean_sr_075(self) -> Optional[float]:
+        """Mean GOT-10k SR@0.75 across all sequences."""
+        acc = [r.accuracy for r in self.sequence_results if r.accuracy is not None]
+        if not acc:
+            return None
+        return float(np.mean([a.sr_075 for a in acc]))
+
+    @property
+    def mean_norm_precision_auc(self) -> Optional[float]:
+        """Mean normalized precision AUC (LaSOT/GOT-10k) across all sequences."""
+        acc = [r.accuracy for r in self.sequence_results if r.accuracy is not None]
+        if not acc:
+            return None
+        return float(np.mean([a.norm_precision_auc for a in acc]))
+
     def summary(self) -> Dict:
         d: Dict = {
             "tracker": self.tracker_name,
@@ -91,6 +116,15 @@ class BenchmarkResult:
             "mean_fps": round(self.mean_fps, 2),
             "peak_memory_mb": round(self.peak_memory_mb, 2),
         }
+        sr05 = self.mean_sr_05
+        if sr05 is not None:
+            d["sr_05"] = round(sr05, 4)
+        sr075 = self.mean_sr_075
+        if sr075 is not None:
+            d["sr_075"] = round(sr075, 4)
+        norm_prec = self.mean_norm_precision_auc
+        if norm_prec is not None:
+            d["norm_precision_auc"] = round(norm_prec, 4)
         mcd = self.mean_center_distance
         if mcd is not None:
             d["mean_center_distance_px"] = round(mcd, 3)
@@ -237,6 +271,8 @@ class BenchmarkEngine:
             except ValueError:
                 pass  # sequence too short (0 update frames)
 
+        accuracy = self._metrics.compute_all(preds_eval, gt_eval)
+
         return SequenceResult(
             sequence_name=seq.name,
             ious=ious,
@@ -245,4 +281,5 @@ class BenchmarkEngine:
             ground_truths=gt_eval,
             center_distances=dists,
             energy=energy,
+            accuracy=accuracy,
         )

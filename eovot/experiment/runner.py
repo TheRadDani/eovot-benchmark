@@ -191,6 +191,9 @@ class ExperimentRunner:
                     "tracker": s.get("tracker", "?"),
                     "dataset": s.get("dataset", "?"),
                     "mIoU": float(s.get("mean_iou", 0.0)),
+                    "sr_05": s.get("sr_05"),
+                    "sr_075": s.get("sr_075"),
+                    "norm_prec": s.get("norm_precision_auc"),
                     "fps": float(s.get("mean_fps", 0.0)),
                     "mem_mb": float(s.get("peak_memory_mb", 0.0)),
                     "n_seq": int(s.get("num_sequences", 0)),
@@ -199,17 +202,40 @@ class ExperimentRunner:
 
         rows.sort(key=lambda x: x["mIoU"], reverse=True)
 
+        # Determine which optional columns have any data.
+        has_sr = any(r["sr_05"] is not None for r in rows)
+        has_norm = any(r["norm_prec"] is not None for r in rows)
+
+        header_parts = ["Rank", "Tracker", "Dataset", "mIoU/AO"]
+        align_parts = ["------", "-------", "-------", "-------:"]
+        if has_sr:
+            header_parts += ["SR@0.5", "SR@0.75"]
+            align_parts += ["------:", "-------:"]
+        if has_norm:
+            header_parts += ["NormPrec AUC"]
+            align_parts += ["-----------:"]
+        header_parts += ["FPS", "Mem (MB)", "Sequences"]
+        align_parts += ["----:", "---------:", "----------:"]
+
         lines = [
             "# EOVOT Experiment Leaderboard\n",
-            "| Rank | Tracker | Dataset | mIoU | FPS | Mem (MB) | Sequences |",
-            "|------|---------|---------|-----:|----:|---------:|----------:|",
+            "| " + " | ".join(header_parts) + " |",
+            "| " + " | ".join(align_parts) + " |",
         ]
         for rank, row in enumerate(rows, start=1):
-            lines.append(
-                f"| {rank} | {row['tracker']} | {row['dataset']} "
-                f"| {row['mIoU']:.4f} | {row['fps']:.1f} "
-                f"| {row['mem_mb']:.1f} | {row['n_seq']} |"
-            )
+            cols = [
+                str(rank),
+                row["tracker"],
+                row["dataset"],
+                f"{row['mIoU']:.4f}",
+            ]
+            if has_sr:
+                cols.append(f"{row['sr_05']:.4f}" if row["sr_05"] is not None else "—")
+                cols.append(f"{row['sr_075']:.4f}" if row["sr_075"] is not None else "—")
+            if has_norm:
+                cols.append(f"{row['norm_prec']:.4f}" if row["norm_prec"] is not None else "—")
+            cols += [f"{row['fps']:.1f}", f"{row['mem_mb']:.1f}", str(row["n_seq"])]
+            lines.append("| " + " | ".join(cols) + " |")
         lines.append("")
         return "\n".join(lines)
 
