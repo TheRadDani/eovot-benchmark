@@ -243,6 +243,7 @@ class ExperimentRunner:
     def _build_tracker(cfg: Dict):
         """Instantiate a tracker from a config dict."""
         from ..trackers.csrt import CSRTTracker
+        from ..trackers.hog_kcf import HOGKCFTracker
         from ..trackers.kcf import KCFTracker
         from ..trackers.median_flow import MedianFlowTracker
         from ..trackers.mil import MILTracker
@@ -251,6 +252,7 @@ class ExperimentRunner:
         registry = {
             "MOSSE": MOSSETracker,
             "KCF": KCFTracker,
+            "HOG-KCF": HOGKCFTracker,
             "CSRT": CSRTTracker,
             "MIL": MILTracker,
             "MedianFlow": MedianFlowTracker,

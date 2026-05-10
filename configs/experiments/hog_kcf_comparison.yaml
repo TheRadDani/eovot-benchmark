@@ -1,0 +1,46 @@
+# HOG-KCF ablation study: raw grayscale KCF vs HOG-feature KCF
+# --------------------------------------------------------------
+# This experiment is designed to isolate the effect of HOG features
+# on correlation filter tracking accuracy and throughput.
+#
+# Research question:
+#   Does replacing raw grayscale with multi-channel HOG features
+#   improve accuracy on structured targets, and at what FPS cost?
+#
+# Usage:
+#   python scripts/run_experiment.py --config configs/experiments/hog_kcf_comparison.yaml
+
+experiment:
+  name: "hog-kcf-ablation"
+  seed: 42
+  tdp_watts: null       # set to device TDP (e.g. 6.0 for RPi4, 15.0 for laptop)
+
+dataset:
+  loader: "OTBDataset"
+  root: "/data/OTB100"  # update to your local OTB100 root
+  name: "OTB100"
+  max_sequences: null   # null = evaluate all sequences
+
+trackers:
+  # Baseline: raw grayscale KCF
+  - name: KCF
+    params:
+      learning_rate: 0.075
+      padding: 1.5
+      kernel_sigma: 0.5
+
+  # Proposed: HOG-feature KCF (same hyperparameters, HOG features)
+  - name: HOG-KCF
+    params:
+      learning_rate: 0.075
+      padding: 1.5
+      kernel_sigma: 0.5
+      n_orient: 8        # number of HOG orientation bins
+      cell_size: 4       # HOG cell size in pixels
+
+  # Additional baselines for context
+  - name: MOSSE
+    params: {}
+
+  - name: CSRT
+    params: {}

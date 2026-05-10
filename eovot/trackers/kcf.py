@@ -205,6 +205,12 @@ class KCFTracker(BaseTracker):
         Using Parseval's theorem this reduces to element-wise FFT operations,
         keeping the cost at O(N log N).
 
+        Normalization: ``xx`` uses Parseval's identity (``sum|X|²/N = ||x||²``).
+        ``cross`` is ``ifft2(X̄·Z)`` without an extra ``/N`` because ``ifft2``
+        already incorporates the ``1/N`` factor, giving the spatial
+        cross-correlation ``(x⋆z)[δ]`` directly.  At zero lag this equals
+        ``||x||²``, making the exponent exactly 0 and the kernel peak exactly 1.
+
         Args:
             xf: DFT of the template patch.
             zf: DFT of the candidate patch.
@@ -213,9 +219,10 @@ class KCFTracker(BaseTracker):
             DFT of the Gaussian kernel response map.
         """
         N = xf.shape[0] * xf.shape[1]
-        xx = np.real(np.sum(xf * np.conj(xf))) / N
-        zz = np.real(np.sum(zf * np.conj(zf))) / N
-        cross = np.real(np.fft.ifft2(np.conj(xf) * zf)) / N
+        xx = np.real(np.sum(xf * np.conj(xf))) / N   # = ||x||²  (Parseval)
+        zz = np.real(np.sum(zf * np.conj(zf))) / N   # = ||z||²
+        # ifft2 already applies 1/N, so cross[δ] = (x⋆z)[δ] — spatial xcorr.
+        cross = np.real(np.fft.ifft2(np.conj(xf) * zf))
         exponent = np.maximum(0.0, xx + zz - 2.0 * cross) / (self.kernel_sigma ** 2)
         return np.fft.fft2(np.exp(-exponent))
 
