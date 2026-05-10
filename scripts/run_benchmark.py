@@ -36,7 +36,7 @@ from eovot.datasets.got10k import GOT10kDataset
 from eovot.datasets.lasot import LaSOTDataset
 from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.mosse import MOSSETracker
-from eovot.trackers.kcf import KCFTracker
+from eovot.trackers.hog_kcf import HOGKCFTracker
 from eovot.trackers.csrt import CSRTTracker
 from eovot.trackers.median_flow import MedianFlowTracker
 
@@ -48,6 +48,7 @@ from eovot.trackers.median_flow import MedianFlowTracker
 TRACKER_REGISTRY: Dict[str, Any] = {
     "MOSSE": MOSSETracker,
     "KCF": KCFTracker,
+    "HOG-KCF": HOGKCFTracker,
     "CSRT": CSRTTracker,
     "MedianFlow": MedianFlowTracker,
 }
@@ -201,7 +202,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # Convenience overrides (used when --config is not provided)
     parser.add_argument("--tracker", default="MOSSE",
                         choices=list(TRACKER_REGISTRY),
-                        help="Tracker to evaluate.")
+                        help="Tracker to evaluate (default: MOSSE).")
     parser.add_argument("--dataset-root", metavar="DIR",
                         help="Path to dataset root directory.")
     parser.add_argument("--dataset-name", default="dataset",
