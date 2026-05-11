@@ -1,0 +1,100 @@
+# Hardware profiles for EOVOT deployment advisor
+#
+# Each profile defines the deployment constraints of a target device.
+# These values are used by DeploymentAdvisor to score tracker benchmark
+# results and generate go/no-go recommendations.
+#
+# Fields:
+#   tdp_watts          - CPU Thermal Design Power (W)
+#   memory_mb          - Available RAM (MB)
+#   target_fps         - Minimum real-time FPS requirement
+#   latency_budget_ms  - Maximum per-frame processing time (ms)
+#   power_budget_w     - Maximum sustained power draw (W)
+#
+# Note: memory_safety_factor (default 0.80) is applied by DeploymentAdvisor
+#       to reserve headroom for the OS and system processes.
+
+profiles:
+  raspberry_pi_4:
+    display_name: "Raspberry Pi 4 (4 GB)"
+    tdp_watts: 6.0
+    memory_mb: 4096
+    target_fps: 25.0
+    latency_budget_ms: 40.0
+    power_budget_w: 5.0
+    category: ultra_low
+    description: "Quad-core ARM Cortex-A72 @ 1.5 GHz, 4 GB LPDDR4, no GPU"
+
+  raspberry_pi_5:
+    display_name: "Raspberry Pi 5 (8 GB)"
+    tdp_watts: 12.0
+    memory_mb: 8192
+    target_fps: 30.0
+    latency_budget_ms: 33.0
+    power_budget_w: 10.0
+    category: ultra_low
+    description: "Quad-core ARM Cortex-A76 @ 2.4 GHz, 8 GB LPDDR4X"
+
+  jetson_nano:
+    display_name: "NVIDIA Jetson Nano (4 GB)"
+    tdp_watts: 10.0
+    memory_mb: 4096
+    target_fps: 30.0
+    latency_budget_ms: 33.0
+    power_budget_w: 10.0
+    category: edge
+    description: "Quad-core ARM Cortex-A57 @ 1.43 GHz, 128-core Maxwell GPU"
+
+  jetson_xavier_nx:
+    display_name: "NVIDIA Jetson Xavier NX (8 GB)"
+    tdp_watts: 15.0
+    memory_mb: 8192
+    target_fps: 60.0
+    latency_budget_ms: 16.0
+    power_budget_w: 15.0
+    category: edge
+    description: "6-core NVIDIA Carmel, 384-core Volta GPU, 8 GB LPDDR4x"
+
+  jetson_orin_nano:
+    display_name: "NVIDIA Jetson Orin Nano (8 GB)"
+    tdp_watts: 15.0
+    memory_mb: 8192
+    target_fps: 60.0
+    latency_budget_ms: 16.0
+    power_budget_w: 15.0
+    category: edge
+    description: "6-core Arm Cortex-A78AE, 1024-core Ampere GPU, 8 GB LPDDR5"
+
+  intel_nuc_i5:
+    display_name: "Intel NUC (i5-1135G7)"
+    tdp_watts: 28.0
+    memory_mb: 16384
+    target_fps: 60.0
+    latency_budget_ms: 16.0
+    power_budget_w: 20.0
+    category: embedded
+    description: "4-core Tiger Lake @ 2.4–4.2 GHz, Intel Iris Xe, 16 GB DDR4"
+
+  laptop_cpu:
+    display_name: "Generic Laptop CPU (15 W TDP)"
+    tdp_watts: 15.0
+    memory_mb: 8192
+    target_fps: 30.0
+    latency_budget_ms: 33.0
+    power_budget_w: 15.0
+    category: laptop
+    description: "Representative mobile CPU, ~15 W TDP class"
+
+  workstation:
+    display_name: "Workstation CPU (65 W TDP)"
+    tdp_watts: 65.0
+    memory_mb: 32768
+    target_fps: 120.0
+    latency_budget_ms: 8.0
+    power_budget_w: 65.0
+    category: workstation
+    description: "Desktop-class CPU, no strict power constraint"
+
+# Deployment advisor settings
+advisor:
+  memory_safety_factor: 0.80   # fraction of RAM available to the tracker
