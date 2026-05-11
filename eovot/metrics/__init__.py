@@ -7,6 +7,14 @@ from .accuracy import (
     MetricsEngine,
 )
 from .robustness import RobustnessAnalyzer, RobustnessResult
+from .statistical import (
+    BootstrapCI,
+    WilcoxonResult,
+    StatisticalSummary,
+    StatisticalComparison,
+    bootstrap_ci,
+    wilcoxon_signed_rank,
+)
 
 __all__ = [
     "iou",
@@ -15,4 +23,10 @@ __all__ = [
     "MetricsEngine",
     "RobustnessAnalyzer",
     "RobustnessResult",
+    "BootstrapCI",
+    "WilcoxonResult",
+    "StatisticalSummary",
+    "StatisticalComparison",
+    "bootstrap_ci",
+    "wilcoxon_signed_rank",
 ]
