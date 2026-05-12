@@ -1,0 +1,45 @@
+# EOVOT Synthetic Smoke-Test Experiment
+# ---------------------------------------
+# Runs MOSSE, KCF, and MedianFlow against a small procedurally generated
+# dataset.  No dataset download required — sequences are created in memory.
+#
+# New parameters added by the enhanced SyntheticDataset:
+#   background_type: "solid" | "gradient"
+#   add_noise:       true | false
+#   scale_change:    1.0 = fixed size; >1.0 = smooth size oscillation
+#
+# Usage:
+#   python scripts/run_benchmark.py --config configs/experiments/synthetic_smoke_test.yaml
+
+experiment:
+  name: "synthetic-smoke-test"
+  output_dir: "results/synthetic-smoke-test/"
+  seed: 42
+
+dataset:
+  name: "Synthetic-smoke"
+  loader: "SyntheticDataset"
+  root: "synthetic"                    # ignored by SyntheticDataset
+  params:
+    n_sequences: 5                     # keep short for a fast CI smoke test
+    n_frames: 50                       # frames per sequence
+    motion: "linear"                   # linear | circular | sinusoidal | random | random_walk
+    speed: 3.0
+    seed: 42
+    background_type: "gradient"        # gradient background for more realistic appearance
+    add_noise: false                   # enable for harder evaluation
+    scale_change: 1.0                  # 1.0 = fixed size; try 1.5 for scale variation
+
+tracker:
+  name: "MOSSE"
+  params:
+    learning_rate: 0.125
+    sigma: 2.0
+
+benchmark:
+  verbose: true
+  tdp_watts: null                      # set to e.g. 15.0 to enable energy estimation
+
+reporting:
+  formats: ["json", "csv"]
+  print_summary: true

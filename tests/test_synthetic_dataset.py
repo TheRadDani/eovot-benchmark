@@ -1,4 +1,4 @@
-"""Tests for eovot.datasets.synthetic.SyntheticDataset.
+"""Tests for eovot.datasets.synthetic.SyntheticDataset and SyntheticConfig.
 
 All tests run entirely in memory — no real video or annotation files needed.
 """
@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from eovot.datasets.synthetic import SyntheticDataset, SyntheticSequence
+from eovot.datasets.synthetic import SyntheticConfig, SyntheticDataset, SyntheticSequence
 from eovot.datasets.base import Sequence, BaseDataset
 
 
@@ -203,3 +203,92 @@ class TestBaseDatasetCompliance:
         ds = SyntheticDataset(n_sequences=1, n_frames=5, frame_size=(160, 120))
         frame = next(iter(ds[0]))
         assert frame.shape == (120, 160, 3)
+
+
+# ---------------------------------------------------------------------------
+# SyntheticConfig dataclass
+# ---------------------------------------------------------------------------
+
+class TestSyntheticConfig:
+    def test_defaults(self):
+        cfg = SyntheticConfig()
+        assert cfg.num_sequences == 5
+        assert cfg.sequence_length == 50
+        assert cfg.motion == "linear"
+        assert cfg.scale_change == 1.0
+        assert not cfg.add_noise
+
+    def test_custom_values(self):
+        cfg = SyntheticConfig(num_sequences=8, sequence_length=200, motion="circular", seed=7)
+        assert cfg.num_sequences == 8
+        assert cfg.sequence_length == 200
+        assert cfg.motion == "circular"
+        assert cfg.seed == 7
+
+    def test_config_based_construction(self):
+        cfg = SyntheticConfig(num_sequences=3, sequence_length=15, motion="random", seed=0)
+        ds = SyntheticDataset(config=cfg)
+        assert len(ds) == 3
+        seq = ds[0]
+        assert len(seq) == 15
+
+
+# ---------------------------------------------------------------------------
+# New features: scale change, noise, gradient background, random_walk alias
+# ---------------------------------------------------------------------------
+
+class TestNewFeatures:
+    def test_scale_change_varies_box_size(self):
+        ds = SyntheticDataset(n_sequences=1, n_frames=40, scale_change=2.0, seed=0)
+        seq = ds[0]
+        frames = list(seq)
+        assert len(frames) == 40
+
+    def test_no_scale_change_fixed_gt_size(self):
+        ds = SyntheticDataset(n_sequences=1, n_frames=20, scale_change=1.0, seed=3)
+        gt = ds[0].ground_truth
+        np.testing.assert_allclose(gt[:, 2], gt[0, 2], err_msg="Width should be constant")
+        np.testing.assert_allclose(gt[:, 3], gt[0, 3], err_msg="Height should be constant")
+
+    def test_add_noise_produces_different_frames(self):
+        ds_noisy = SyntheticDataset(n_sequences=1, n_frames=5, add_noise=True, seed=1)
+        ds_clean = SyntheticDataset(n_sequences=1, n_frames=5, add_noise=False, seed=1)
+        f_noisy = list(ds_noisy[0])[1].astype(np.float32)
+        f_clean = list(ds_clean[0])[1].astype(np.float32)
+        assert np.abs(f_noisy - f_clean).mean() > 0
+
+    def test_gradient_background_type(self):
+        ds = SyntheticDataset(
+            n_sequences=1, n_frames=5, background_type="gradient", seed=2
+        )
+        frame = next(iter(ds[0]))
+        assert frame.dtype == np.uint8
+        assert frame.shape[2] == 3
+
+    def test_random_walk_alias(self):
+        ds = SyntheticDataset(n_sequences=1, n_frames=20, motion="random_walk", seed=5)
+        assert len(ds) == 1
+        gt = ds[0].ground_truth
+        cx = gt[:, 0] + gt[:, 2] / 2
+        assert cx.std() > 0
+
+    def test_frame_copy_isolation(self):
+        """Mutating a yielded frame must not corrupt the cached sequence."""
+        ds = SyntheticDataset(n_sequences=1, n_frames=5, seed=0)
+        seq = ds[0]
+        frames1 = list(seq)
+        original_val = int(frames1[0][0, 0, 0])
+        frames1[0][0, 0, 0] = 255 - original_val
+        frames2 = list(seq)
+        assert int(frames2[0][0, 0, 0]) == original_val
+
+    def test_benchmark_engine_integration(self):
+        """Full pipeline smoke test with SyntheticDataset + BenchmarkEngine."""
+        from eovot.benchmark.engine import BenchmarkEngine
+        from eovot.trackers.mosse import MOSSETracker
+
+        ds = SyntheticDataset(n_sequences=2, n_frames=10, motion="linear", seed=0)
+        result = BenchmarkEngine(verbose=False).run(MOSSETracker(), ds, dataset_name="Syn")
+        assert result.tracker_name == "MOSSE"
+        assert len(result.sequence_results) == 2
+        assert result.mean_fps > 0.0

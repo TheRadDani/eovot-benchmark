@@ -34,7 +34,7 @@ from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
 from eovot.datasets.lasot import LaSOTDataset
-from eovot.datasets.synthetic import SyntheticDataset
+from eovot.datasets.synthetic import SyntheticConfig, SyntheticDataset
 from eovot.trackers.csrt import CSRTTracker
 from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.median_flow import MedianFlowTracker
@@ -130,6 +130,9 @@ def run_from_config(cfg: Dict) -> None:
             motion=syn_params.get("motion", "linear"),
             speed=syn_params.get("speed", 3.0),
             seed=syn_params.get("seed", 42),
+            background_type=syn_params.get("background_type", "solid"),
+            add_noise=bool(syn_params.get("add_noise", False)),
+            scale_change=float(syn_params.get("scale_change", 1.0)),
         )
     else:
         dataset = loader_cls(ds_cfg["root"])
