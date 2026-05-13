@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from ..datasets.base import BaseDataset, Sequence
-from ..metrics.accuracy import MetricsEngine, center_distance
+from ..metrics.accuracy import MetricsEngine, center_distance, normalized_center_distance
 from ..profiling.energy import EnergyProfiler, EnergyResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
@@ -19,10 +19,13 @@ class SequenceResult:
     sequence_name: str
     ious: np.ndarray
     profiling: ProfilingResult
-    predictions: Optional[np.ndarray] = None       # shape (N, 4) — predicted boxes
-    ground_truths: Optional[np.ndarray] = None     # shape (N, 4) — GT boxes aligned to predictions
-    center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
-    energy: Optional[EnergyResult] = None          # energy estimate; None when TDP not configured
+    predictions: Optional[np.ndarray] = None              # shape (N, 4) — predicted boxes
+    ground_truths: Optional[np.ndarray] = None            # shape (N, 4) — GT boxes aligned to predictions
+    center_distances: Optional[np.ndarray] = None         # shape (N,)  — per-frame centre-distance (px)
+    normalized_center_distances: Optional[np.ndarray] = None  # shape (N,) — NCD per frame (LaSOT)
+    energy: Optional[EnergyResult] = None                 # energy estimate; None when TDP not configured
+    norm_prec_auc: Optional[float] = None                 # normalized precision AUC (LaSOT protocol)
+    norm_prec_at_01: Optional[float] = None               # NP score at threshold 0.1
 
     @property
     def mean_iou(self) -> float:
@@ -34,6 +37,13 @@ class SequenceResult:
         if self.center_distances is None or len(self.center_distances) == 0:
             return None
         return float(self.center_distances.mean())
+
+    @property
+    def mean_normalized_center_distance(self) -> Optional[float]:
+        """Mean normalized centre-distance (LaSOT protocol), or None if not stored."""
+        if self.normalized_center_distances is None or len(self.normalized_center_distances) == 0:
+            return None
+        return float(self.normalized_center_distances.mean())
 
 
 @dataclass
@@ -59,6 +69,17 @@ class BenchmarkResult:
         return float(np.concatenate(dists).mean())
 
     @property
+    def mean_normalized_center_distance(self) -> Optional[float]:
+        """Mean normalized centre-distance across all sequences (LaSOT), or None."""
+        norm_dists = [
+            r.normalized_center_distances for r in self.sequence_results
+            if r.normalized_center_distances is not None
+        ]
+        if not norm_dists:
+            return None
+        return float(np.concatenate(norm_dists).mean())
+
+    @property
     def mean_fps(self) -> float:
         return float(np.mean([r.profiling.fps for r in self.sequence_results]))
 
@@ -82,6 +103,18 @@ class BenchmarkResult:
             return None
         return float(np.mean([r.energy.energy_per_frame_mj for r in with_energy]))
 
+    @property
+    def mean_norm_prec_auc(self) -> Optional[float]:
+        """Mean normalized precision AUC across sequences, or ``None`` if not computed."""
+        values = [r.norm_prec_auc for r in self.sequence_results if r.norm_prec_auc is not None]
+        return float(np.mean(values)) if values else None
+
+    @property
+    def mean_norm_prec_at_01(self) -> Optional[float]:
+        """Mean NP score at threshold 0.1 across sequences, or ``None`` if not computed."""
+        values = [r.norm_prec_at_01 for r in self.sequence_results if r.norm_prec_at_01 is not None]
+        return float(np.mean(values)) if values else None
+
     def summary(self) -> Dict:
         d: Dict = {
             "tracker": self.tracker_name,
@@ -94,6 +127,12 @@ class BenchmarkResult:
         mcd = self.mean_center_distance
         if mcd is not None:
             d["mean_center_distance_px"] = round(mcd, 3)
+        np_auc = self.mean_norm_prec_auc
+        if np_auc is not None:
+            d["mean_norm_prec_auc"] = round(np_auc, 4)
+        np_01 = self.mean_norm_prec_at_01
+        if np_01 is not None:
+            d["norm_prec_at_01"] = round(np_01, 4)
         e_total = self.total_energy_j
         if e_total is not None:
             d["total_energy_j"] = round(e_total, 4)
@@ -118,6 +157,10 @@ class BenchmarkResult:
                 "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
                 "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
             }
+            if r.norm_prec_auc is not None:
+                entry["norm_prec_auc"] = round(r.norm_prec_auc, 4)
+            if r.norm_prec_at_01 is not None:
+                entry["norm_prec_at_01"] = round(r.norm_prec_at_01, 4)
             if r.energy is not None:
                 entry["energy_j"] = round(r.energy.total_energy_j, 6)
                 entry["energy_per_frame_mj"] = round(r.energy.energy_per_frame_mj, 4)
@@ -223,12 +266,28 @@ class BenchmarkEngine:
 
         ious = self._metrics.batch_iou(preds_eval, gt_eval)
 
-        # Compute per-frame centre-distances so precision curves use real data.
+        # Per-frame centre-distances (pixels) for raw precision curves.
         dists = np.array(
             [center_distance(tuple(preds_eval[i]), tuple(gt_eval[i]))  # type: ignore[arg-type]
              for i in range(n_eval)],
             dtype=np.float64,
         )
+
+        # Per-frame normalized centre-distances + pre-computed LaSOT scalars.
+        norm_dists = np.array(
+            [
+                normalized_center_distance(tuple(preds_eval[i]), tuple(gt_eval[i]))  # type: ignore[arg-type]
+                for i in range(n_eval)
+            ],
+            dtype=np.float64,
+        )
+        thr_np, npr = self._metrics.normalized_precision_curve(preds_eval, gt_eval)
+        try:
+            _trapz = np.trapezoid  # numpy ≥ 2.0
+        except AttributeError:
+            _trapz = np.trapz  # numpy < 2.0
+        np_auc = float(_trapz(npr, thr_np) / thr_np[-1]) if thr_np[-1] > 0 else 0.0
+        np_at_01 = float(np.interp(0.1, thr_np, npr))
 
         energy: Optional[EnergyResult] = None
         if self._energy_profiler is not None:
@@ -244,5 +303,8 @@ class BenchmarkEngine:
             predictions=preds_eval,
             ground_truths=gt_eval,
             center_distances=dists,
+            normalized_center_distances=norm_dists,
             energy=energy,
+            norm_prec_auc=np_auc,
+            norm_prec_at_01=np_at_01,
         )
