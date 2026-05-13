@@ -241,7 +241,24 @@ class ExperimentRunner:
 
     @staticmethod
     def _build_tracker(cfg: Dict):
-        """Instantiate a tracker from a config dict."""
+        """Instantiate a tracker from a config dict.
+
+        For ONNX-based trackers, specify::
+
+            trackers:
+              - name: OnnxTracker
+                params:
+                  model_path: path/to/model.onnx
+                  callbacks_module: my_package.my_callbacks
+                  tracker_name: SiamFC    # optional display name
+                  providers:              # optional; defaults to CPU
+                    - CUDAExecutionProvider
+                    - CPUExecutionProvider
+
+        The ``callbacks_module`` must expose ``init_fn`` and ``update_fn``
+        at module level matching the :class:`~eovot.trackers.onnx_tracker.OnnxTracker`
+        callback signatures.
+        """
         from ..trackers.csrt import CSRTTracker
         from ..trackers.kcf import KCFTracker
         from ..trackers.median_flow import MedianFlowTracker
@@ -256,9 +273,48 @@ class ExperimentRunner:
             "MedianFlow": MedianFlowTracker,
         }
         name = cfg["name"]
+
+        if name == "OnnxTracker":
+            return ExperimentRunner._build_onnx_tracker(cfg.get("params", {}) or {})
+
         if name not in registry:
             raise ValueError(
-                f"Unknown tracker '{name}'. Available: {list(registry)}"
+                f"Unknown tracker '{name}'. Available: {list(registry) + ['OnnxTracker']}"
             )
         params = cfg.get("params", {}) or {}
         return registry[name](**params)
+
+    @staticmethod
+    def _build_onnx_tracker(params: Dict):
+        """Instantiate an :class:`~eovot.trackers.onnx_tracker.OnnxTracker` from params.
+
+        Loads callback functions by importing ``callbacks_module`` and reading
+        its ``init_fn`` and ``update_fn`` attributes.
+
+        Args:
+            params: Dict with keys ``model_path``, ``callbacks_module``,
+                and optionally ``tracker_name`` and ``providers``.
+
+        Raises:
+            KeyError: If ``model_path`` or ``callbacks_module`` is missing.
+            ImportError: If the callbacks module cannot be imported or if
+                onnxruntime is not installed.
+        """
+        import importlib
+
+        from ..trackers.onnx_tracker import OnnxTracker
+
+        model_path = params["model_path"]
+        callbacks_module_name = params["callbacks_module"]
+        mod = importlib.import_module(callbacks_module_name)
+
+        init_fn = getattr(mod, "init_fn")
+        update_fn = getattr(mod, "update_fn")
+
+        return OnnxTracker(
+            model_path=model_path,
+            init_fn=init_fn,
+            update_fn=update_fn,
+            name=params.get("tracker_name"),
+            providers=params.get("providers"),
+        )
