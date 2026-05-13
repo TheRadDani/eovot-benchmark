@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from ..datasets.base import BaseDataset, Sequence
-from ..metrics.accuracy import MetricsEngine, center_distance
+from ..metrics.accuracy import MetricsEngine, center_distance, normalized_center_distance
 from ..profiling.energy import EnergyProfiler, EnergyResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
@@ -19,10 +19,11 @@ class SequenceResult:
     sequence_name: str
     ious: np.ndarray
     profiling: ProfilingResult
-    predictions: Optional[np.ndarray] = None       # shape (N, 4) — predicted boxes
-    ground_truths: Optional[np.ndarray] = None     # shape (N, 4) — GT boxes aligned to predictions
-    center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
-    energy: Optional[EnergyResult] = None          # energy estimate; None when TDP not configured
+    predictions: Optional[np.ndarray] = None              # shape (N, 4) — predicted boxes
+    ground_truths: Optional[np.ndarray] = None            # shape (N, 4) — GT boxes aligned to predictions
+    center_distances: Optional[np.ndarray] = None         # shape (N,)  — per-frame centre-distance (px)
+    normalized_center_distances: Optional[np.ndarray] = None  # shape (N,)  — NCD per frame (LaSOT)
+    energy: Optional[EnergyResult] = None                 # energy estimate; None when TDP not configured
 
     @property
     def mean_iou(self) -> float:
@@ -34,6 +35,13 @@ class SequenceResult:
         if self.center_distances is None or len(self.center_distances) == 0:
             return None
         return float(self.center_distances.mean())
+
+    @property
+    def mean_normalized_center_distance(self) -> Optional[float]:
+        """Mean normalized centre-distance (LaSOT protocol), or None if not stored."""
+        if self.normalized_center_distances is None or len(self.normalized_center_distances) == 0:
+            return None
+        return float(self.normalized_center_distances.mean())
 
 
 @dataclass
@@ -57,6 +65,17 @@ class BenchmarkResult:
         if not dists:
             return None
         return float(np.concatenate(dists).mean())
+
+    @property
+    def mean_normalized_center_distance(self) -> Optional[float]:
+        """Mean normalized centre-distance across all sequences (LaSOT), or None."""
+        norm_dists = [
+            r.normalized_center_distances for r in self.sequence_results
+            if r.normalized_center_distances is not None
+        ]
+        if not norm_dists:
+            return None
+        return float(np.concatenate(norm_dists).mean())
 
     @property
     def mean_fps(self) -> float:
@@ -94,6 +113,9 @@ class BenchmarkResult:
         mcd = self.mean_center_distance
         if mcd is not None:
             d["mean_center_distance_px"] = round(mcd, 3)
+        mncd = self.mean_normalized_center_distance
+        if mncd is not None:
+            d["mean_normalized_center_distance"] = round(mncd, 4)
         e_total = self.total_energy_j
         if e_total is not None:
             d["total_energy_j"] = round(e_total, 4)
@@ -118,6 +140,9 @@ class BenchmarkResult:
                 "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
                 "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
             }
+            mncd = r.mean_normalized_center_distance
+            if mncd is not None:
+                entry["mean_normalized_center_distance"] = round(mncd, 4)
             if r.energy is not None:
                 entry["energy_j"] = round(r.energy.total_energy_j, 6)
                 entry["energy_per_frame_mj"] = round(r.energy.energy_per_frame_mj, 4)
@@ -223,10 +248,19 @@ class BenchmarkEngine:
 
         ious = self._metrics.batch_iou(preds_eval, gt_eval)
 
-        # Compute per-frame centre-distances so precision curves use real data.
+        # Per-frame centre-distances (pixels) for raw precision curves.
         dists = np.array(
             [center_distance(tuple(preds_eval[i]), tuple(gt_eval[i]))  # type: ignore[arg-type]
              for i in range(n_eval)],
+            dtype=np.float64,
+        )
+
+        # Per-frame normalized centre-distances (LaSOT NP metric).
+        norm_dists = np.array(
+            [
+                normalized_center_distance(tuple(preds_eval[i]), tuple(gt_eval[i]))  # type: ignore[arg-type]
+                for i in range(n_eval)
+            ],
             dtype=np.float64,
         )
 
@@ -244,5 +278,6 @@ class BenchmarkEngine:
             predictions=preds_eval,
             ground_truths=gt_eval,
             center_distances=dists,
+            normalized_center_distances=norm_dists,
             energy=energy,
         )

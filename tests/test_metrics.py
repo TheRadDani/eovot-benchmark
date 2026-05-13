@@ -3,7 +3,12 @@
 import numpy as np
 import pytest
 
-from eovot.metrics.accuracy import MetricsEngine, iou, center_distance
+from eovot.metrics.accuracy import (
+    MetricsEngine,
+    iou,
+    center_distance,
+    normalized_center_distance,
+)
 
 
 class TestIoU:
@@ -51,6 +56,34 @@ class TestCenterDistance:
         a = (10.0, 10.0, 20.0, 20.0)
         b = (13.0, 14.0, 20.0, 20.0)
         assert center_distance(a, b) == pytest.approx(5.0)
+
+
+class TestNormalizedCenterDistance:
+    def test_same_box_is_zero(self):
+        box = (0.0, 0.0, 100.0, 100.0)
+        assert normalized_center_distance(box, box) == pytest.approx(0.0)
+
+    def test_scale_invariance(self):
+        # Scaling both boxes by 2× should yield the same normalised distance.
+        small_pred = (5.0, 0.0, 10.0, 10.0)
+        small_gt = (0.0, 0.0, 10.0, 10.0)
+        big_pred = (10.0, 0.0, 20.0, 20.0)
+        big_gt = (0.0, 0.0, 20.0, 20.0)
+        ncd_small = normalized_center_distance(small_pred, small_gt)
+        ncd_big = normalized_center_distance(big_pred, big_gt)
+        assert ncd_small == pytest.approx(ncd_big, rel=1e-5)
+
+    def test_known_value(self):
+        # pred centre = (15, 5), gt centre = (10, 5) → dist = 5
+        # gt scale = sqrt(10 * 10) = 10 → NCD = 0.5
+        pred = (10.0, 0.0, 10.0, 10.0)
+        gt = (5.0, 0.0, 10.0, 10.0)
+        assert normalized_center_distance(pred, gt) == pytest.approx(0.5)
+
+    def test_zero_area_gt_returns_zero(self):
+        pred = (0.0, 0.0, 10.0, 10.0)
+        gt_zero = (0.0, 0.0, 0.0, 0.0)
+        assert normalized_center_distance(pred, gt_zero) == pytest.approx(0.0)
 
 
 class TestBatchIoU:
@@ -129,3 +162,35 @@ class TestMetricsEngine:
         assert 0.0 <= result.mean_iou <= 1.0
         assert 0.0 <= result.success_auc <= 1.0
         assert 0.0 <= result.precision_auc <= 1.0
+
+    def test_compute_all_includes_normalized_precision(self):
+        preds = np.tile([0.0, 0.0, 10.0, 10.0], (30, 1))
+        gts = np.tile([0.0, 0.0, 10.0, 10.0], (30, 1))
+        result = self.engine.compute_all(preds, gts)
+        # Perfect predictions → normalized_precision_auc should be near 1.0
+        assert result.normalized_precision_auc == pytest.approx(1.0, abs=0.05)
+
+    def test_normalized_precision_curve_shape(self):
+        preds = np.tile([5.0, 5.0, 20.0, 20.0], (10, 1))
+        gts = np.tile([5.0, 5.0, 20.0, 20.0], (10, 1))
+        thresholds, rates = self.engine.normalized_precision_curve(preds, gts)
+        assert len(thresholds) == len(rates)
+        assert thresholds[0] == pytest.approx(0.0)
+        assert thresholds[-1] == pytest.approx(0.5)
+        assert np.all(rates >= 0.0) and np.all(rates <= 1.0)
+
+    def test_normalized_precision_curve_perfect(self):
+        # Identical boxes → NCD = 0 → precision = 1.0 for all thresholds > 0
+        preds = np.tile([10.0, 10.0, 30.0, 30.0], (20, 1))
+        gts = np.tile([10.0, 10.0, 30.0, 30.0], (20, 1))
+        _, rates = self.engine.normalized_precision_curve(preds, gts)
+        assert rates[-1] == pytest.approx(1.0)
+
+    def test_normalized_precision_auc_range(self):
+        rng = np.random.default_rng(0)
+        preds = rng.uniform(0, 100, (50, 4))
+        gts = rng.uniform(0, 100, (50, 4))
+        preds[:, 2:] = np.abs(preds[:, 2:]) + 1
+        gts[:, 2:] = np.abs(gts[:, 2:]) + 1
+        result = self.engine.compute_all(preds, gts)
+        assert 0.0 <= result.normalized_precision_auc <= 1.0
