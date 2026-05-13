@@ -163,34 +163,97 @@ class TestMetricsEngine:
         assert 0.0 <= result.success_auc <= 1.0
         assert 0.0 <= result.precision_auc <= 1.0
 
-    def test_compute_all_includes_normalized_precision(self):
-        preds = np.tile([0.0, 0.0, 10.0, 10.0], (30, 1))
-        gts = np.tile([0.0, 0.0, 10.0, 10.0], (30, 1))
+    def test_compute_all_includes_norm_prec(self):
+        preds = np.tile([0.0, 0.0, 50.0, 50.0], (20, 1))
+        gts = np.tile([0.0, 0.0, 50.0, 50.0], (20, 1))
         result = self.engine.compute_all(preds, gts)
-        # Perfect predictions → normalized_precision_auc should be near 1.0
-        assert result.normalized_precision_auc == pytest.approx(1.0, abs=0.05)
+        # Perfect predictions → NP AUC should be near 1.0
+        assert result.norm_prec_auc >= 0.98
+        assert result.norm_prec_at_01 == pytest.approx(1.0)
 
-    def test_normalized_precision_curve_shape(self):
-        preds = np.tile([5.0, 5.0, 20.0, 20.0], (10, 1))
-        gts = np.tile([5.0, 5.0, 20.0, 20.0], (10, 1))
-        thresholds, rates = self.engine.normalized_precision_curve(preds, gts)
-        assert len(thresholds) == len(rates)
-        assert thresholds[0] == pytest.approx(0.0)
-        assert thresholds[-1] == pytest.approx(0.5)
-        assert np.all(rates >= 0.0) and np.all(rates <= 1.0)
-
-    def test_normalized_precision_curve_perfect(self):
-        # Identical boxes → NCD = 0 → precision = 1.0 for all thresholds > 0
-        preds = np.tile([10.0, 10.0, 30.0, 30.0], (20, 1))
-        gts = np.tile([10.0, 10.0, 30.0, 30.0], (20, 1))
-        _, rates = self.engine.normalized_precision_curve(preds, gts)
-        assert rates[-1] == pytest.approx(1.0)
-
-    def test_normalized_precision_auc_range(self):
+    def test_norm_prec_auc_range(self):
         rng = np.random.default_rng(0)
         preds = rng.uniform(0, 100, (50, 4))
         gts = rng.uniform(0, 100, (50, 4))
         preds[:, 2:] = np.abs(preds[:, 2:]) + 1
         gts[:, 2:] = np.abs(gts[:, 2:]) + 1
         result = self.engine.compute_all(preds, gts)
-        assert 0.0 <= result.normalized_precision_auc <= 1.0
+        assert 0.0 <= result.norm_prec_auc <= 1.0
+
+
+class TestNormalizedPrecisionCurve:
+    """Tests for MetricsEngine.normalized_precision_curve."""
+
+    def setup_method(self):
+        self.engine = MetricsEngine()
+
+    def test_perfect_predictions_high_precision(self):
+        # Identical boxes → centre distance = 0 → all normalized dists = 0.
+        # Precision should be 1.0 at every threshold > 0.
+        preds = np.tile([10.0, 10.0, 40.0, 30.0], (30, 1))
+        gts = np.tile([10.0, 10.0, 40.0, 30.0], (30, 1))
+        thresholds, rates = self.engine.normalized_precision_curve(preds, gts)
+        assert rates[-1] == pytest.approx(1.0)
+
+    def test_zero_precision_far_predictions(self):
+        # Predictions 100 px away from a 10×10 target → normalized dist ≈ 10.0,
+        # which exceeds even the maximum threshold of 0.5.
+        preds = np.tile([110.0, 110.0, 10.0, 10.0], (20, 1))
+        gts = np.tile([0.0, 0.0, 10.0, 10.0], (20, 1))
+        thresholds, rates = self.engine.normalized_precision_curve(preds, gts)
+        assert rates[-1] == pytest.approx(0.0)
+
+    def test_threshold_range(self):
+        preds = np.random.default_rng(7).uniform(0, 50, (40, 4))
+        gts = np.random.default_rng(13).uniform(0, 50, (40, 4))
+        preds[:, 2:] = np.abs(preds[:, 2:]) + 5
+        gts[:, 2:] = np.abs(gts[:, 2:]) + 5
+        thresholds, rates = self.engine.normalized_precision_curve(preds, gts)
+        assert len(thresholds) == len(rates)
+        assert thresholds[0] == pytest.approx(0.0)
+        assert thresholds[-1] == pytest.approx(0.5)
+        assert np.all(rates >= 0.0) and np.all(rates <= 1.0)
+
+    def test_monotone_increasing(self):
+        # Precision rate must be non-decreasing as threshold increases.
+        preds = np.random.default_rng(99).uniform(0, 80, (60, 4))
+        gts = np.random.default_rng(55).uniform(0, 80, (60, 4))
+        preds[:, 2:] = np.abs(preds[:, 2:]) + 5
+        gts[:, 2:] = np.abs(gts[:, 2:]) + 5
+        _, rates = self.engine.normalized_precision_curve(preds, gts)
+        assert np.all(np.diff(rates) >= -1e-9), "Precision curve must be non-decreasing"
+
+    def test_scale_invariance(self):
+        # A prediction shifted by 5 % of the target size should score the same
+        # NP regardless of the absolute target size.
+        def _build(target_size: float):
+            shift = 0.05 * target_size
+            preds = np.array([[shift, 0.0, target_size, target_size]] * 20)
+            gts = np.array([[0.0, 0.0, target_size, target_size]] * 20)
+            return preds, gts
+
+        preds_small, gts_small = _build(20.0)
+        preds_large, gts_large = _build(200.0)
+        _, rates_small = self.engine.normalized_precision_curve(preds_small, gts_small)
+        _, rates_large = self.engine.normalized_precision_curve(preds_large, gts_large)
+        np.testing.assert_allclose(rates_small, rates_large, atol=1e-6)
+
+    def test_custom_thresholds(self):
+        preds = np.tile([0.0, 0.0, 40.0, 40.0], (10, 1))
+        gts = np.tile([0.0, 0.0, 40.0, 40.0], (10, 1))
+        custom_thr = np.array([0.0, 0.1, 0.2, 0.3])
+        thresholds, rates = self.engine.normalized_precision_curve(
+            preds, gts, thresholds=custom_thr
+        )
+        np.testing.assert_array_equal(thresholds, custom_thr)
+        assert len(rates) == len(custom_thr)
+
+    def test_np_at_01_via_compute_all(self):
+        # Shift prediction by 4 px on a 50×50 target → norm_dist = 4/50 = 0.08 < 0.1
+        w, h = 50.0, 50.0
+        shift = 4.0
+        preds = np.array([[shift, 0.0, w, h]] * 30)
+        gts = np.array([[0.0, 0.0, w, h]] * 30)
+        result = self.engine.compute_all(preds, gts)
+        # Every frame has norm_dist = 0.08 < 0.1 → NP@0.1 should be 1.0.
+        assert result.norm_prec_at_01 == pytest.approx(1.0)

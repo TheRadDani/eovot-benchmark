@@ -9,10 +9,10 @@ LaSOT benchmarks:
 - **Precision Curve** — fraction of frames whose predicted centre is
   within a pixel-distance threshold of the ground-truth centre,
   swept from 0 to 50 px; AUC at 20 px is the canonical scalar.
-- **Normalized Precision Curve** — same as Precision Curve but the
-  centre-error is divided by ``sqrt(gt_w * gt_h)`` before thresholding,
-  making it scale-invariant.  This is the primary metric used by LaSOT
-  (Fan et al., CVPR 2019).  Thresholds sweep from 0 to 0.5 (51 steps).
+- **Normalized Precision Curve** — scale-invariant variant that divides the
+  centre distance by ``sqrt(gt_w × gt_h)`` before thresholding (LaSOT
+  protocol).  Threshold range is 0 → 0.5; AUC and score at threshold 0.1
+  are the canonical LaSOT scalars.
 - **AccuracyMetrics** dataclass that bundles all scalars together.
 """
 
@@ -89,7 +89,7 @@ def normalized_center_distance(pred: BBox, gt: BBox) -> float:
     """
     px, py, pw, ph = pred
     gx, gy, gw, gh = gt
-    gt_scale = math.sqrt(gw * gh)
+    gt_scale = math.sqrt(max(0.0, gw * gh))
     if gt_scale <= 0.0:
         return 0.0
     dx = (px + pw / 2) - (gx + gw / 2)
@@ -110,14 +110,20 @@ class AccuracyMetrics:
     precision_auc: float
     """Normalised AUC of the Precision Curve (distance thresholds 0 → 50 px)."""
 
-    normalized_precision_auc: float = field(default=0.0)
+    norm_prec_auc: float = field(default=0.0)
     """Normalised AUC of the Normalized Precision Curve (LaSOT protocol).
 
-    Thresholds sweep from 0 to 0.5 in 51 steps.  The centre-error is
-    divided by ``sqrt(gt_w * gt_h)`` before thresholding, making this
-    metric scale-invariant and directly comparable to LaSOT leaderboard
-    results.  Defaults to ``0.0`` for backward compatibility with callers
-    that construct :class:`AccuracyMetrics` without this field.
+    Thresholds sweep 0 → 0.5 in 51 steps; centre-error is divided by
+    ``sqrt(gt_w * gt_h)`` making this scale-invariant and directly comparable
+    to LaSOT leaderboard results.  Defaults to ``0.0`` for backward compatibility.
+    """
+
+    norm_prec_at_01: float = field(default=0.0)
+    """Normalised Precision score at threshold 0.1 — the canonical LaSOT scalar.
+
+    Equals the fraction of frames whose normalised centre-distance is below 0.1
+    (i.e., within 10 % of the target's geometric-mean dimension).
+    Defaults to ``0.0`` when ground-truth sizes are unavailable.
     """
 
     def __str__(self) -> str:
@@ -126,7 +132,8 @@ class AccuracyMetrics:
             f"mIoU={self.mean_iou:.4f}, "
             f"success_AUC={self.success_auc:.4f}, "
             f"precision_AUC={self.precision_auc:.4f}, "
-            f"norm_precision_AUC={self.normalized_precision_auc:.4f})"
+            f"norm_prec_AUC={self.norm_prec_auc:.4f}, "
+            f"norm_prec@0.1={self.norm_prec_at_01:.4f})"
         )
 
 
@@ -142,6 +149,7 @@ class MetricsEngine:
         ious   = engine.batch_iou(preds, gts)
         result = engine.compute_all(preds, gts)
         print(result.success_auc)
+        print(result.norm_prec_at_01)  # canonical LaSOT scalar
     """
 
     def batch_iou(self, preds: np.ndarray, gts: np.ndarray) -> np.ndarray:
@@ -210,17 +218,22 @@ class MetricsEngine:
         gts: np.ndarray,
         thresholds: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Normalized Precision curve (LaSOT protocol).
+        """Scale-invariant precision curve (LaSOT benchmark protocol).
 
-        Each frame's centre-error is divided by ``sqrt(gt_w * gt_h)`` before
-        thresholding, yielding a scale-invariant precision measure.  Threshold
-        range follows the LaSOT convention: 0 to 0.5 in 51 steps.
+        Normalizes per-frame centre distance by ``sqrt(gt_w × gt_h)`` before
+        thresholding, removing the dependence on absolute target size.  This
+        allows fair comparison across sequences with objects of vastly different
+        scales (e.g., a person close-up vs. a tiny drone).
+
+        The canonical LaSOT scalar is the precision rate at threshold ``0.1``
+        (i.e., the fraction of frames whose normalized centre distance is below
+        10 % of the target's geometric-mean dimension).
 
         Args:
             preds:      ``(N, 4)`` predicted boxes in ``(x, y, w, h)`` format.
-            gts:        ``(N, 4)`` ground-truth boxes.
-            thresholds: Normalised-distance thresholds (default: 0 … 0.5,
-                        51 evenly-spaced values).
+            gts:        ``(N, 4)`` ground-truth boxes in ``(x, y, w, h)`` format.
+            thresholds: Normalized distance thresholds (default: 0 → 0.5,
+                        51 evenly-spaced points matching LaSOT convention).
 
         Returns:
             ``(thresholds, precision_rates)`` — both shape ``(T,)``.
@@ -232,7 +245,8 @@ class MetricsEngine:
             [
                 normalized_center_distance(tuple(preds[i]), tuple(gts[i]))  # type: ignore[arg-type]
                 for i in range(n)
-            ]
+            ],
+            dtype=np.float64,
         )
         rates = np.array([(norm_dists < t).mean() for t in thresholds])
         return thresholds, rates
@@ -242,18 +256,18 @@ class MetricsEngine:
         preds: np.ndarray,
         gts: np.ndarray,
     ) -> AccuracyMetrics:
-        """Compute all accuracy metrics in one call.
+        """Compute all scalar accuracy metrics in one call.
 
-        Computes mean IoU, success AUC, raw precision AUC, and
-        normalized precision AUC (LaSOT protocol).
+        Computes mean IoU, success-curve AUC, pixel-precision-curve AUC,
+        normalised-precision-curve AUC, and the NP score at threshold 0.1.
 
         Args:
             preds: ``(N, 4)`` predicted boxes in ``(x, y, w, h)`` format.
-            gts:   ``(N, 4)`` ground-truth boxes.
+            gts:   ``(N, 4)`` ground-truth boxes in ``(x, y, w, h)`` format.
 
         Returns:
             :class:`AccuracyMetrics` with all scalar summaries populated,
-            including ``normalized_precision_auc``.
+            including ``norm_prec_auc`` and ``norm_prec_at_01``.
         """
         ious = self.batch_iou(preds, gts)
 
@@ -268,14 +282,14 @@ class MetricsEngine:
         thr_dist, pr = self.precision_curve(preds, gts)
         prec_auc = float(_trapz(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
 
-        thr_norm, npr = self.normalized_precision_curve(preds, gts)
-        norm_prec_auc = (
-            float(_trapz(npr, thr_norm) / thr_norm[-1]) if thr_norm[-1] > 0 else 0.0
-        )
+        thr_np, npr = self.normalized_precision_curve(preds, gts)
+        np_auc = float(_trapz(npr, thr_np) / thr_np[-1]) if thr_np[-1] > 0 else 0.0
+        np_at_01 = float(np.interp(0.1, thr_np, npr))
 
         return AccuracyMetrics(
             mean_iou=float(ious.mean()),
             success_auc=success_auc,
             precision_auc=prec_auc,
-            normalized_precision_auc=norm_prec_auc,
+            norm_prec_auc=np_auc,
+            norm_prec_at_01=np_at_01,
         )

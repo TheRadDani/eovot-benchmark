@@ -22,8 +22,10 @@ class SequenceResult:
     predictions: Optional[np.ndarray] = None              # shape (N, 4) — predicted boxes
     ground_truths: Optional[np.ndarray] = None            # shape (N, 4) — GT boxes aligned to predictions
     center_distances: Optional[np.ndarray] = None         # shape (N,)  — per-frame centre-distance (px)
-    normalized_center_distances: Optional[np.ndarray] = None  # shape (N,)  — NCD per frame (LaSOT)
+    normalized_center_distances: Optional[np.ndarray] = None  # shape (N,) — NCD per frame (LaSOT)
     energy: Optional[EnergyResult] = None                 # energy estimate; None when TDP not configured
+    norm_prec_auc: Optional[float] = None                 # normalized precision AUC (LaSOT protocol)
+    norm_prec_at_01: Optional[float] = None               # NP score at threshold 0.1
 
     @property
     def mean_iou(self) -> float:
@@ -101,6 +103,18 @@ class BenchmarkResult:
             return None
         return float(np.mean([r.energy.energy_per_frame_mj for r in with_energy]))
 
+    @property
+    def mean_norm_prec_auc(self) -> Optional[float]:
+        """Mean normalized precision AUC across sequences, or ``None`` if not computed."""
+        values = [r.norm_prec_auc for r in self.sequence_results if r.norm_prec_auc is not None]
+        return float(np.mean(values)) if values else None
+
+    @property
+    def mean_norm_prec_at_01(self) -> Optional[float]:
+        """Mean NP score at threshold 0.1 across sequences, or ``None`` if not computed."""
+        values = [r.norm_prec_at_01 for r in self.sequence_results if r.norm_prec_at_01 is not None]
+        return float(np.mean(values)) if values else None
+
     def summary(self) -> Dict:
         d: Dict = {
             "tracker": self.tracker_name,
@@ -113,9 +127,12 @@ class BenchmarkResult:
         mcd = self.mean_center_distance
         if mcd is not None:
             d["mean_center_distance_px"] = round(mcd, 3)
-        mncd = self.mean_normalized_center_distance
-        if mncd is not None:
-            d["mean_normalized_center_distance"] = round(mncd, 4)
+        np_auc = self.mean_norm_prec_auc
+        if np_auc is not None:
+            d["mean_norm_prec_auc"] = round(np_auc, 4)
+        np_01 = self.mean_norm_prec_at_01
+        if np_01 is not None:
+            d["norm_prec_at_01"] = round(np_01, 4)
         e_total = self.total_energy_j
         if e_total is not None:
             d["total_energy_j"] = round(e_total, 4)
@@ -140,9 +157,10 @@ class BenchmarkResult:
                 "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
                 "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
             }
-            mncd = r.mean_normalized_center_distance
-            if mncd is not None:
-                entry["mean_normalized_center_distance"] = round(mncd, 4)
+            if r.norm_prec_auc is not None:
+                entry["norm_prec_auc"] = round(r.norm_prec_auc, 4)
+            if r.norm_prec_at_01 is not None:
+                entry["norm_prec_at_01"] = round(r.norm_prec_at_01, 4)
             if r.energy is not None:
                 entry["energy_j"] = round(r.energy.total_energy_j, 6)
                 entry["energy_per_frame_mj"] = round(r.energy.energy_per_frame_mj, 4)
@@ -255,7 +273,7 @@ class BenchmarkEngine:
             dtype=np.float64,
         )
 
-        # Per-frame normalized centre-distances (LaSOT NP metric).
+        # Per-frame normalized centre-distances + pre-computed LaSOT scalars.
         norm_dists = np.array(
             [
                 normalized_center_distance(tuple(preds_eval[i]), tuple(gt_eval[i]))  # type: ignore[arg-type]
@@ -263,6 +281,13 @@ class BenchmarkEngine:
             ],
             dtype=np.float64,
         )
+        thr_np, npr = self._metrics.normalized_precision_curve(preds_eval, gt_eval)
+        try:
+            _trapz = np.trapezoid  # numpy ≥ 2.0
+        except AttributeError:
+            _trapz = np.trapz  # numpy < 2.0
+        np_auc = float(_trapz(npr, thr_np) / thr_np[-1]) if thr_np[-1] > 0 else 0.0
+        np_at_01 = float(np.interp(0.1, thr_np, npr))
 
         energy: Optional[EnergyResult] = None
         if self._energy_profiler is not None:
@@ -280,4 +305,6 @@ class BenchmarkEngine:
             center_distances=dists,
             normalized_center_distances=norm_dists,
             energy=energy,
+            norm_prec_auc=np_auc,
+            norm_prec_at_01=np_at_01,
         )
