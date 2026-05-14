@@ -22,13 +22,17 @@ class ProfilingResult:
     latency_std_ms: float
     latency_p95_ms: float
     peak_memory_mb: float
+    latency_p99_ms: float = 0.0
+    """99th-percentile per-frame latency (ms) — tail latency indicator."""
+    fps_std: float = 0.0
+    """Standard deviation of per-frame FPS — measures throughput stability."""
 
     def __str__(self) -> str:
         return (
             f"ProfilingResult[{self.tracker_name}] "
-            f"FPS={self.fps:.1f}  "
+            f"FPS={self.fps:.1f}±{self.fps_std:.1f}  "
             f"latency={self.latency_mean_ms:.2f}±{self.latency_std_ms:.2f} ms  "
-            f"p95={self.latency_p95_ms:.2f} ms  "
+            f"p95={self.latency_p95_ms:.2f} ms  p99={self.latency_p99_ms:.2f} ms  "
             f"mem={self.peak_memory_mb:.1f} MiB  "
             f"frames={self.frame_count}"
         )
@@ -64,6 +68,7 @@ class Profiler:
             raise ValueError("No frames profiled.")
         arr = np.array(self._latencies)
         mean_ms = float(arr.mean())
+        per_frame_fps = np.where(arr > 0, 1_000.0 / arr, 0.0)
         return ProfilingResult(
             tracker_name=tracker_name,
             frame_count=len(arr),
@@ -72,6 +77,8 @@ class Profiler:
             latency_std_ms=float(arr.std()),
             latency_p95_ms=float(np.percentile(arr, 95)),
             peak_memory_mb=self._peak_memory_mb,
+            latency_p99_ms=float(np.percentile(arr, 99)),
+            fps_std=float(per_frame_fps.std()),
         )
 
     def reset(self) -> None:

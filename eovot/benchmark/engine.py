@@ -115,7 +115,10 @@ class BenchmarkResult:
                 "sequence_name": r.sequence_name,
                 "mean_iou": round(r.mean_iou, 4),
                 "fps": round(r.profiling.fps, 2),
+                "fps_std": round(r.profiling.fps_std, 2),
                 "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
+                "latency_p95_ms": round(r.profiling.latency_p95_ms, 3),
+                "latency_p99_ms": round(r.profiling.latency_p99_ms, 3),
                 "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
             }
             if r.energy is not None:
