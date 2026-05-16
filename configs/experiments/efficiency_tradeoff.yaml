@@ -1,0 +1,64 @@
+# EOVOT Experiment: Edge Efficiency Trade-off Analysis
+#
+# Evaluates all classical trackers against hardware budgets representative
+# of common edge deployment targets and ranks them by composite efficiency.
+#
+# Run with:
+#   python scripts/run_experiment.py --config configs/experiments/efficiency_tradeoff.yaml
+#
+# Expected output (approximate, OTB-100, Intel Core i7 @ 15W TDP):
+#
+#   Rank | Tracker    | mIoU  | Efficiency | FPS   | Mem (MB)
+#   -----|------------|-------|------------|-------|----------
+#     1  | MOSSE      | 0.50  | 0.92       | 500+  | 80
+#     2  | KCF        | 0.55  | 0.85       | 200+  | 100
+#     3  | MedianFlow | 0.45  | 0.72       | 120   | 110
+#     4  | CSRT       | 0.65  | 0.55       | 40    | 150
+#
+# Note: CSRT achieves the highest accuracy (0.65) but lowest efficiency (0.55)
+# due to its high memory and CPU usage. On a Jetson Nano with tight memory
+# constraints, MOSSE or KCF are the Pareto-optimal choices.
+#
+# Edge device presets (update target_fps + max_memory_mb accordingly):
+#
+#   Device              target_fps  max_memory_mb  max_energy_mj  tdp_watts
+#   ------------------  ----------  -------------  -------------  ---------
+#   Raspberry Pi 4         15           512            2.0          6.0
+#   Jetson Nano            30          3800            5.0         10.0
+#   Laptop CPU             30          4096           10.0         15.0
+#   Desktop Workstation    60         16384           20.0         65.0
+
+experiment:
+  name: "edge-efficiency-tradeoff"
+  seed: 42
+  tdp_watts: 15.0          # Set to your device TDP for energy profiling
+
+dataset:
+  loader: OTBDataset        # OTBDataset | GOT10kDataset | LaSOTDataset
+  root: /data/OTB100        # <-- update to your dataset path
+  name: OTB100
+  max_sequences: null       # Set to e.g. 10 for a quick test
+
+efficiency:
+  target_fps: 30.0          # Minimum FPS for real-time deployment
+  max_memory_mb: 512.0      # Memory budget (e.g. Jetson Nano: 3800, RPi4: 512)
+  max_energy_mj: 5.0        # Energy budget per frame in milli-Joules (null to disable)
+  fps_weight: 0.5           # Weight of FPS in composite score
+  memory_weight: 0.3        # Weight of memory efficiency
+  energy_weight: 0.2        # Weight of energy efficiency
+
+trackers:
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+      sigma: 2.0
+
+  - name: KCF
+    params:
+      learning_rate: 0.125
+
+  - name: MedianFlow
+    params: {}
+
+  - name: CSRT
+    params: {}

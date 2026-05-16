@@ -15,9 +15,12 @@ lightweight; install it with ``pip install matplotlib``).
 """
 
 from .plots import plot_success_curves, plot_precision_curves, plot_tracker_comparison
+from .pareto import plot_pareto_frontier, plot_efficiency_radar
 
 __all__ = [
     "plot_success_curves",
     "plot_precision_curves",
     "plot_tracker_comparison",
+    "plot_pareto_frontier",
+    "plot_efficiency_radar",
 ]

@@ -7,6 +7,7 @@ from .accuracy import (
     MetricsEngine,
 )
 from .robustness import RobustnessAnalyzer, RobustnessResult
+from .efficiency import EdgeEfficiencyScore, EdgeEfficiencyAnalyzer
 
 __all__ = [
     "iou",
@@ -15,4 +16,6 @@ __all__ = [
     "MetricsEngine",
     "RobustnessAnalyzer",
     "RobustnessResult",
+    "EdgeEfficiencyScore",
+    "EdgeEfficiencyAnalyzer",
 ]
