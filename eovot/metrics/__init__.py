@@ -7,6 +7,13 @@ from .accuracy import (
     MetricsEngine,
 )
 from .robustness import RobustnessAnalyzer, RobustnessResult
+from .got10k_eval import (
+    compute_ao,
+    compute_sr,
+    GOT10kSequenceResult,
+    GOT10kReport,
+    GOT10kEvaluator,
+)
 
 __all__ = [
     "iou",
@@ -15,4 +22,9 @@ __all__ = [
     "MetricsEngine",
     "RobustnessAnalyzer",
     "RobustnessResult",
+    "compute_ao",
+    "compute_sr",
+    "GOT10kSequenceResult",
+    "GOT10kReport",
+    "GOT10kEvaluator",
 ]
