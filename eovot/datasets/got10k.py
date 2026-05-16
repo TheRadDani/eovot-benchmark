@@ -109,7 +109,7 @@ class GOT10kDataset(BaseDataset):
         self._seq_names = names
         return self._seq_names
 
-    def _load_sequence(self, seq_name: str) -> Sequence:
+    def load_sequence(self, seq_name: str) -> Sequence:
         """Load a single GOT-10k sequence by name.
 
         Frames are referenced by path (lazy I/O) rather than pre-loaded,
@@ -161,8 +161,6 @@ class GOT10kDataset(BaseDataset):
     @property
     def name(self) -> str:
         return f"GOT-10k-{self.split}"
-
-        return Sequence(name=seq_name, frame_paths=frame_paths_str, ground_truth=gt_array)
 
     @staticmethod
     def _load_groundtruth(gt_file: Path) -> List[BBox]:
