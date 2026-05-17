@@ -306,20 +306,115 @@ class BenchmarkVisualizer:
         plt.close(fig)
         return path
 
+    def plot_efficiency_accuracy(
+        self,
+        results: List["BenchmarkResult"],
+        filename: str = "efficiency_accuracy.png",
+        title: Optional[str] = None,
+        memory_budget_mb: float = 512.0,
+    ) -> Path:
+        """Scatter plot of accuracy (mIoU) vs throughput (FPS), bubble area ∝ memory.
+
+        EOVOT's signature visualisation — the efficiency-accuracy trade-off
+        plot that differentiates this benchmark from accuracy-only evaluations.
+        Each bubble represents one tracker:
+
+        * X-axis: mean FPS (efficiency proxy)
+        * Y-axis: mean IoU (accuracy)
+        * Bubble area: proportional to peak memory footprint
+        * Bold black outline: Pareto-optimal trackers
+
+        Args:
+            results: List of :class:`BenchmarkResult` objects (one per tracker).
+            filename: Output filename relative to ``output_dir``.
+            title: Optional plot title.
+            memory_budget_mb: Reference memory ceiling for EES computation
+                and bubble scaling.  Default: ``512.0`` MB.
+
+        Returns:
+            Path to the saved PNG file.
+        """
+        from ..metrics.efficiency import EfficiencyMetricsEngine
+
+        eff_engine = EfficiencyMetricsEngine(memory_budget_mb=memory_budget_mb)
+        ranking = eff_engine.rank_trackers(results)
+
+        fig, ax = plt.subplots(figsize=self.figsize)
+
+        mem_vals = [e.peak_memory_mb for e in ranking]
+        max_mem = max(mem_vals) if mem_vals else 1.0
+
+        for i, entry in enumerate(ranking):
+            color = _PALETTE[i % len(_PALETTE)]
+            # Bubble area in points² — minimum 80 so tiny-memory trackers are visible.
+            size = max(80.0, (entry.peak_memory_mb / max_mem) * 1200.0)
+            edgecolor = "black" if entry.on_pareto_front else "white"
+            linewidth = 2.5 if entry.on_pareto_front else 0.8
+            label = (
+                f"{entry.tracker_name} "
+                f"(EES={entry.ees:.3f}{'  ✓' if entry.on_pareto_front else ''})"
+            )
+            ax.scatter(
+                entry.fps,
+                entry.mean_iou,
+                s=size,
+                c=color,
+                alpha=0.82,
+                edgecolors=edgecolor,
+                linewidths=linewidth,
+                zorder=3,
+                label=label,
+            )
+            ax.annotate(
+                entry.tracker_name,
+                (entry.fps, entry.mean_iou),
+                textcoords="offset points",
+                xytext=(8, 4),
+                fontsize=9,
+            )
+
+        ax.set_xlabel("Mean FPS  (higher → more efficient)", fontsize=12)
+        ax.set_ylabel("Mean IoU  (higher → more accurate)", fontsize=12)
+        ax.set_ylim(0.0, 1.0)
+        ax.set_title(
+            title or "Efficiency–Accuracy Trade-off  (bubble area ∝ memory)",
+            fontsize=12,
+        )
+        ax.legend(loc="lower right", fontsize=9)
+        ax.grid(True, linestyle="--", alpha=0.4)
+
+        if any(e.on_pareto_front for e in ranking):
+            ax.text(
+                0.02, 0.97,
+                "✓ = Pareto-optimal",
+                transform=ax.transAxes,
+                fontsize=8,
+                va="top",
+                color="gray",
+            )
+
+        path = self.output_dir / filename
+        fig.tight_layout()
+        fig.savefig(path, dpi=self.dpi)
+        plt.close(fig)
+        return path
+
     def save_all(
         self,
         results: List["BenchmarkResult"],
         prefix: str = "benchmark",
     ) -> dict:
-        """Save all four standard plots and return a mapping of name → path.
+        """Save standard plots and return a mapping of name → path.
+
+        Saves success, precision, FPS, per-sequence IoU, and (when multiple
+        trackers are provided) the efficiency-accuracy trade-off scatter plot.
 
         Args:
             results: List of benchmark results (one or more trackers).
             prefix: Filename prefix for all saved plots.
 
         Returns:
-            Dict mapping ``{"success", "precision", "fps", "sequence_ious"}``
-            to their respective :class:`pathlib.Path` objects.
+            Dict mapping plot names to their :class:`pathlib.Path` objects.
         """
         paths = {}
         paths["success"] = self.plot_success_curves(
@@ -335,4 +430,8 @@ class BenchmarkVisualizer:
         paths["sequence_ious"] = self.plot_sequence_ious(
             results[0], filename=f"{prefix}_seq_ious.png"
         )
+        if len(results) > 1:
+            paths["efficiency_accuracy"] = self.plot_efficiency_accuracy(
+                results, filename=f"{prefix}_efficiency_accuracy.png"
+            )
         return paths

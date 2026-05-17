@@ -141,8 +141,10 @@ class BenchmarkReporter:
             A ``| col | col | ... |`` formatted string (no trailing newline).
         """
         s = result.get("summary", {})
-        tracker = s.get("tracker_name", "?")
-        dataset = s.get("dataset_name", "?")
+        # "tracker" is the canonical key produced by BenchmarkResult.summary();
+        # fall back to "tracker_name" for backward compatibility with older result files.
+        tracker = s.get("tracker") or s.get("tracker_name", "?")
+        dataset = s.get("dataset") or s.get("dataset_name", "?")
         mean_iou = s.get("mean_iou", 0.0)
         mean_prec = s.get("mean_precision", 0.0)
         fps = s.get("mean_fps", 0.0)
