@@ -3,6 +3,7 @@
 from .accuracy import (
     iou,
     center_distance,
+    normalized_center_error,
     AccuracyMetrics,
     MetricsEngine,
 )
@@ -12,6 +13,7 @@ from .efficiency import EfficiencyEntry, EfficiencyMetricsEngine
 __all__ = [
     "iou",
     "center_distance",
+    "normalized_center_error",
     "AccuracyMetrics",
     "MetricsEngine",
     "RobustnessAnalyzer",
