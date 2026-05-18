@@ -1,4 +1,4 @@
-"""Metrics sub-package — accuracy and efficiency evaluation."""
+"""Metrics sub-package — accuracy, robustness, and temporal evaluation."""
 
 from .accuracy import (
     iou,
@@ -7,6 +7,7 @@ from .accuracy import (
     MetricsEngine,
 )
 from .robustness import RobustnessAnalyzer, RobustnessResult
+from .temporal import TemporalDriftAnalyzer, TemporalDriftResult, TrackerDriftSummary
 
 __all__ = [
     "iou",
@@ -15,4 +16,7 @@ __all__ = [
     "MetricsEngine",
     "RobustnessAnalyzer",
     "RobustnessResult",
+    "TemporalDriftAnalyzer",
+    "TemporalDriftResult",
+    "TrackerDriftSummary",
 ]
