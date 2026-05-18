@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from eovot.metrics.accuracy import MetricsEngine, iou, center_distance
+from eovot.metrics.accuracy import AccuracyMetrics, MetricsEngine, iou, center_distance
 
 
 class TestIoU:
@@ -129,3 +129,175 @@ class TestMetricsEngine:
         assert 0.0 <= result.mean_iou <= 1.0
         assert 0.0 <= result.success_auc <= 1.0
         assert 0.0 <= result.precision_auc <= 1.0
+
+
+class TestVectorizedBatchIoU:
+    """Verify that vectorized batch_iou matches the scalar iou() on known inputs."""
+
+    def setup_method(self):
+        self.engine = MetricsEngine()
+
+    def test_matches_scalar_iou_partial_overlap(self):
+        a = np.array([[0.0, 0.0, 10.0, 10.0]])
+        b = np.array([[5.0, 0.0, 10.0, 10.0]])
+        expected = iou((0.0, 0.0, 10.0, 10.0), (5.0, 0.0, 10.0, 10.0))
+        result = self.engine.batch_iou(a, b)
+        assert result[0] == pytest.approx(expected)
+
+    def test_matches_scalar_iou_contained(self):
+        outer = np.array([[0.0, 0.0, 100.0, 100.0]])
+        inner = np.array([[25.0, 25.0, 50.0, 50.0]])
+        expected = iou((0.0, 0.0, 100.0, 100.0), (25.0, 25.0, 50.0, 50.0))
+        result = self.engine.batch_iou(outer, inner)
+        assert result[0] == pytest.approx(expected)
+
+    def test_degenerate_boxes_yield_zero(self):
+        preds = np.array([[0.0, 0.0, 0.0, 10.0], [0.0, 0.0, 10.0, 0.0]])
+        gts = np.array([[0.0, 0.0, 10.0, 10.0], [0.0, 0.0, 10.0, 10.0]])
+        result = self.engine.batch_iou(preds, gts)
+        np.testing.assert_array_equal(result, [0.0, 0.0])
+
+    def test_no_overlap_bulk(self):
+        # 100 non-overlapping pairs
+        rng = np.random.default_rng(0)
+        preds = np.column_stack([
+            rng.uniform(0, 50, 100),
+            rng.uniform(0, 50, 100),
+            np.full(100, 5.0),
+            np.full(100, 5.0),
+        ])
+        # GT boxes far away
+        gts = np.column_stack([
+            rng.uniform(200, 300, 100),
+            rng.uniform(200, 300, 100),
+            np.full(100, 5.0),
+            np.full(100, 5.0),
+        ])
+        result = self.engine.batch_iou(preds, gts)
+        np.testing.assert_array_equal(result, np.zeros(100))
+
+    def test_perfect_overlap_bulk(self):
+        boxes = np.tile([10.0, 20.0, 30.0, 40.0], (50, 1))
+        result = self.engine.batch_iou(boxes, boxes)
+        np.testing.assert_allclose(result, np.ones(50))
+
+    def test_symmetry(self):
+        rng = np.random.default_rng(7)
+        preds = rng.uniform(0, 80, (30, 4))
+        gts = rng.uniform(0, 80, (30, 4))
+        preds[:, 2:] += 5
+        gts[:, 2:] += 5
+        ab = self.engine.batch_iou(preds, gts)
+        ba = self.engine.batch_iou(gts, preds)
+        np.testing.assert_allclose(ab, ba, atol=1e-12)
+
+    def test_output_range(self):
+        rng = np.random.default_rng(99)
+        preds = rng.uniform(0, 200, (200, 4))
+        gts = rng.uniform(0, 200, (200, 4))
+        preds[:, 2:] = np.abs(preds[:, 2:]) + 1
+        gts[:, 2:] = np.abs(gts[:, 2:]) + 1
+        result = self.engine.batch_iou(preds, gts)
+        assert result.shape == (200,)
+        assert float(result.min()) >= 0.0
+        assert float(result.max()) <= 1.0
+
+    def test_empty_input(self):
+        preds = np.empty((0, 4))
+        gts = np.empty((0, 4))
+        result = self.engine.batch_iou(preds, gts)
+        assert result.shape == (0,)
+
+
+class TestNormalizedPrecision:
+    """Tests for scale-invariant normalized precision curve."""
+
+    def setup_method(self):
+        self.engine = MetricsEngine()
+
+    def test_identical_boxes_perfect_precision(self):
+        boxes = np.tile([10.0, 10.0, 50.0, 50.0], (20, 1))
+        thresholds, rates = self.engine.normalized_precision_curve(boxes, boxes)
+        # Zero normalized distance → precision = 1.0 at all thresholds > 0
+        assert rates[-1] == pytest.approx(1.0)
+        # Threshold = 0 → distance is NOT < 0, so rate = 0
+        assert rates[0] == pytest.approx(0.0)
+
+    def test_output_shape_and_range(self):
+        rng = np.random.default_rng(42)
+        preds = rng.uniform(0, 100, (50, 4))
+        gts = rng.uniform(0, 100, (50, 4))
+        preds[:, 2:] += 10
+        gts[:, 2:] += 10
+        thresholds, rates = self.engine.normalized_precision_curve(preds, gts)
+        assert thresholds.shape == rates.shape
+        assert float(rates.min()) >= 0.0
+        assert float(rates.max()) <= 1.0
+
+    def test_scale_invariance(self):
+        """Doubling the image scale should not change the normalized precision."""
+        rng = np.random.default_rng(5)
+        preds = rng.uniform(0, 50, (40, 4))
+        gts = rng.uniform(0, 50, (40, 4))
+        preds[:, 2:] += 5
+        gts[:, 2:] += 5
+
+        preds_2x = preds * 2.0
+        gts_2x = gts * 2.0
+
+        _, rates_1x = self.engine.normalized_precision_curve(preds, gts)
+        _, rates_2x = self.engine.normalized_precision_curve(preds_2x, gts_2x)
+
+        np.testing.assert_allclose(rates_1x, rates_2x, atol=1e-10)
+
+    def test_auc_in_compute_all(self):
+        boxes = np.tile([0.0, 0.0, 30.0, 30.0], (20, 1))
+        result = self.engine.compute_all(boxes, boxes)
+        assert 0.0 <= result.norm_precision_auc <= 1.0
+        assert result.norm_precision_auc == pytest.approx(1.0, abs=0.02)
+
+    def test_norm_precision_auc_range_random(self):
+        rng = np.random.default_rng(13)
+        preds = rng.uniform(0, 100, (60, 4))
+        gts = rng.uniform(0, 100, (60, 4))
+        preds[:, 2:] = np.abs(preds[:, 2:]) + 5
+        gts[:, 2:] = np.abs(gts[:, 2:]) + 5
+        result = self.engine.compute_all(preds, gts)
+        assert 0.0 <= result.norm_precision_auc <= 1.0
+
+    def test_accuracy_metrics_has_norm_field(self):
+        m = AccuracyMetrics(mean_iou=0.5, success_auc=0.4, precision_auc=0.6)
+        assert hasattr(m, "norm_precision_auc")
+        assert m.norm_precision_auc == pytest.approx(0.0)
+
+    def test_empty_input_returns_zero_rates(self):
+        preds = np.empty((0, 4))
+        gts = np.empty((0, 4))
+        thresholds, rates = self.engine.normalized_precision_curve(preds, gts)
+        np.testing.assert_array_equal(rates, np.zeros_like(thresholds))
+
+
+class TestBatchCenterDistances:
+    """Tests for vectorized centre-distance computation."""
+
+    def setup_method(self):
+        self.engine = MetricsEngine()
+
+    def test_same_boxes_zero_distance(self):
+        boxes = np.tile([5.0, 5.0, 20.0, 20.0], (10, 1))
+        dists = self.engine.batch_center_distances(boxes, boxes)
+        np.testing.assert_allclose(dists, np.zeros(10))
+
+    def test_known_distance(self):
+        # Centers: (20, 20) and (23, 24) → distance = 5
+        preds = np.array([[10.0, 10.0, 20.0, 20.0]])
+        gts = np.array([[13.0, 14.0, 20.0, 20.0]])
+        dists = self.engine.batch_center_distances(preds, gts)
+        assert dists[0] == pytest.approx(5.0)
+
+    def test_output_shape(self):
+        preds = np.random.rand(15, 4) * 50 + 5
+        gts = np.random.rand(15, 4) * 50 + 5
+        dists = self.engine.batch_center_distances(preds, gts)
+        assert dists.shape == (15,)
+        assert np.all(dists >= 0.0)
