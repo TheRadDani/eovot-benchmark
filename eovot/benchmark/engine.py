@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from ..datasets.base import BaseDataset, Sequence
-from ..metrics.accuracy import MetricsEngine, center_distance
+from ..metrics.accuracy import AccuracyMetrics, MetricsEngine
 from ..profiling.energy import EnergyProfiler, EnergyResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
@@ -23,6 +23,7 @@ class SequenceResult:
     ground_truths: Optional[np.ndarray] = None     # shape (N, 4) — GT boxes aligned to predictions
     center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
     energy: Optional[EnergyResult] = None          # energy estimate; None when TDP not configured
+    accuracy_metrics: Optional[AccuracyMetrics] = None  # success AUC, precision AUC
 
     @property
     def mean_iou(self) -> float:
@@ -34,6 +35,16 @@ class SequenceResult:
         if self.center_distances is None or len(self.center_distances) == 0:
             return None
         return float(self.center_distances.mean())
+
+    @property
+    def success_auc(self) -> Optional[float]:
+        """Area under the success curve, or None if not computed."""
+        return self.accuracy_metrics.success_auc if self.accuracy_metrics else None
+
+    @property
+    def precision_auc(self) -> Optional[float]:
+        """Normalised AUC of the precision curve, or None if not computed."""
+        return self.accuracy_metrics.precision_auc if self.accuracy_metrics else None
 
 
 @dataclass
@@ -82,6 +93,20 @@ class BenchmarkResult:
             return None
         return float(np.mean([r.energy.energy_per_frame_mj for r in with_energy]))
 
+    @property
+    def mean_success_auc(self) -> Optional[float]:
+        """Mean success-curve AUC across all sequences, or ``None`` if not computed."""
+        aucs = [r.accuracy_metrics.success_auc for r in self.sequence_results
+                if r.accuracy_metrics is not None]
+        return float(np.mean(aucs)) if aucs else None
+
+    @property
+    def mean_precision_auc(self) -> Optional[float]:
+        """Mean precision-curve AUC across all sequences, or ``None`` if not computed."""
+        aucs = [r.accuracy_metrics.precision_auc for r in self.sequence_results
+                if r.accuracy_metrics is not None]
+        return float(np.mean(aucs)) if aucs else None
+
     def summary(self) -> Dict:
         d: Dict = {
             "tracker": self.tracker_name,
@@ -94,6 +119,12 @@ class BenchmarkResult:
         mcd = self.mean_center_distance
         if mcd is not None:
             d["mean_center_distance_px"] = round(mcd, 3)
+        sauc = self.mean_success_auc
+        if sauc is not None:
+            d["success_auc"] = round(sauc, 4)
+        pauc = self.mean_precision_auc
+        if pauc is not None:
+            d["precision_auc"] = round(pauc, 4)
         e_total = self.total_energy_j
         if e_total is not None:
             d["total_energy_j"] = round(e_total, 4)
@@ -118,6 +149,9 @@ class BenchmarkResult:
                 "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
                 "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
             }
+            if r.accuracy_metrics is not None:
+                entry["success_auc"] = round(r.accuracy_metrics.success_auc, 4)
+                entry["precision_auc"] = round(r.accuracy_metrics.precision_auc, 4)
             if r.energy is not None:
                 entry["energy_j"] = round(r.energy.total_energy_j, 6)
                 entry["energy_per_frame_mj"] = round(r.energy.energy_per_frame_mj, 4)
@@ -180,10 +214,14 @@ class BenchmarkEngine:
                 energy_str = ""
                 if seq_result.energy is not None:
                     energy_str = f"  E={seq_result.energy.energy_per_frame_mj:.2f}mJ/fr"
+                sauc_str = ""
+                if seq_result.accuracy_metrics is not None:
+                    sauc_str = f"  AUC={seq_result.accuracy_metrics.success_auc:.3f}"
                 print(
                     f"  [{idx + 1:>3}/{n}] {seq_result.sequence_name:<30s} "
                     f"mIoU={seq_result.mean_iou:.3f}  "
                     f"FPS={seq_result.profiling.fps:.1f}"
+                    f"{sauc_str}"
                     f"{energy_str}"
                 )
 
@@ -223,12 +261,11 @@ class BenchmarkEngine:
 
         ious = self._metrics.batch_iou(preds_eval, gt_eval)
 
-        # Compute per-frame centre-distances so precision curves use real data.
-        dists = np.array(
-            [center_distance(tuple(preds_eval[i]), tuple(gt_eval[i]))  # type: ignore[arg-type]
-             for i in range(n_eval)],
-            dtype=np.float64,
-        )
+        # Vectorised centre-distance computation (replaces element-wise Python loop).
+        dists = self._metrics.batch_center_distance(preds_eval, gt_eval)
+
+        # Full VOT accuracy metrics: success AUC, precision AUC.
+        accuracy = self._metrics.compute_all(preds_eval, gt_eval)
 
         energy: Optional[EnergyResult] = None
         if self._energy_profiler is not None:
@@ -245,4 +282,5 @@ class BenchmarkEngine:
             ground_truths=gt_eval,
             center_distances=dists,
             energy=energy,
+            accuracy_metrics=accuracy,
         )

@@ -171,7 +171,10 @@ class ExperimentRunner:
     # ------------------------------------------------------------------
 
     def _build_leaderboard(self, results: List[Dict]) -> str:
-        """Build a Markdown leaderboard table ranked by mIoU (descending).
+        """Build a Markdown leaderboard ranked by success AUC (descending).
+
+        Success AUC is the standard primary scalar for VOT benchmarks (OTB,
+        GOT-10k, LaSOT).  Falls back to mIoU when success AUC is absent.
 
         Args:
             results: List of result dicts from
@@ -186,28 +189,34 @@ class ExperimentRunner:
         rows = []
         for r in results:
             s = r.get("summary", {})
+            miou = float(s.get("mean_iou", 0.0))
+            sauc = float(s.get("success_auc", miou))   # fall back to mIoU
+            pauc = float(s.get("precision_auc", 0.0))
             rows.append(
                 {
                     "tracker": s.get("tracker", "?"),
                     "dataset": s.get("dataset", "?"),
-                    "mIoU": float(s.get("mean_iou", 0.0)),
+                    "mIoU": miou,
+                    "success_auc": sauc,
+                    "precision_auc": pauc,
                     "fps": float(s.get("mean_fps", 0.0)),
                     "mem_mb": float(s.get("peak_memory_mb", 0.0)),
                     "n_seq": int(s.get("num_sequences", 0)),
                 }
             )
 
-        rows.sort(key=lambda x: x["mIoU"], reverse=True)
+        rows.sort(key=lambda x: x["success_auc"], reverse=True)
 
         lines = [
             "# EOVOT Experiment Leaderboard\n",
-            "| Rank | Tracker | Dataset | mIoU | FPS | Mem (MB) | Sequences |",
-            "|------|---------|---------|-----:|----:|---------:|----------:|",
+            "| Rank | Tracker | Dataset | mIoU | Success AUC | Precision AUC | FPS | Mem (MB) | Sequences |",
+            "|------|---------|---------|-----:|------------:|--------------:|----:|---------:|----------:|",
         ]
         for rank, row in enumerate(rows, start=1):
             lines.append(
                 f"| {rank} | {row['tracker']} | {row['dataset']} "
-                f"| {row['mIoU']:.4f} | {row['fps']:.1f} "
+                f"| {row['mIoU']:.4f} | {row['success_auc']:.4f} "
+                f"| {row['precision_auc']:.4f} | {row['fps']:.1f} "
                 f"| {row['mem_mb']:.1f} | {row['n_seq']} |"
             )
         lines.append("")
