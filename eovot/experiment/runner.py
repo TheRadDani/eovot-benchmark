@@ -171,7 +171,11 @@ class ExperimentRunner:
     # ------------------------------------------------------------------
 
     def _build_leaderboard(self, results: List[Dict]) -> str:
-        """Build a Markdown leaderboard table ranked by mIoU (descending).
+        """Build a Markdown leaderboard ranked by Edge Efficiency Score (descending).
+
+        Includes the EES alongside mIoU, FPS, and memory so that the table
+        directly communicates edge-deployment trade-offs rather than raw
+        accuracy alone.
 
         Args:
             results: List of result dicts from
@@ -183,32 +187,43 @@ class ExperimentRunner:
         if not results:
             return "No results to display.\n"
 
+        import math
+
+        def _ees(mean_iou: float, fps: float, peak_mem: float, budget: float = 512.0) -> float:
+            if fps <= 0 or mean_iou < 0:
+                return 0.0
+            return (mean_iou * math.log1p(fps)) / (1.0 + peak_mem / budget)
+
         rows = []
         for r in results:
             s = r.get("summary", {})
+            miou = float(s.get("mean_iou", 0.0))
+            fps = float(s.get("mean_fps", 0.0))
+            mem = float(s.get("peak_memory_mb", 0.0))
             rows.append(
                 {
                     "tracker": s.get("tracker", "?"),
                     "dataset": s.get("dataset", "?"),
-                    "mIoU": float(s.get("mean_iou", 0.0)),
-                    "fps": float(s.get("mean_fps", 0.0)),
-                    "mem_mb": float(s.get("peak_memory_mb", 0.0)),
+                    "mIoU": miou,
+                    "fps": fps,
+                    "mem_mb": mem,
+                    "ees": _ees(miou, fps, mem),
                     "n_seq": int(s.get("num_sequences", 0)),
                 }
             )
 
-        rows.sort(key=lambda x: x["mIoU"], reverse=True)
+        rows.sort(key=lambda x: x["ees"], reverse=True)
 
         lines = [
             "# EOVOT Experiment Leaderboard\n",
-            "| Rank | Tracker | Dataset | mIoU | FPS | Mem (MB) | Sequences |",
-            "|------|---------|---------|-----:|----:|---------:|----------:|",
+            "| Rank | Tracker | Dataset | mIoU | FPS | Mem (MB) | EES | Sequences |",
+            "|------|---------|---------|-----:|----:|---------:|----:|----------:|",
         ]
         for rank, row in enumerate(rows, start=1):
             lines.append(
                 f"| {rank} | {row['tracker']} | {row['dataset']} "
                 f"| {row['mIoU']:.4f} | {row['fps']:.1f} "
-                f"| {row['mem_mb']:.1f} | {row['n_seq']} |"
+                f"| {row['mem_mb']:.1f} | {row['ees']:.4f} | {row['n_seq']} |"
             )
         lines.append("")
         return "\n".join(lines)
@@ -223,16 +238,35 @@ class ExperimentRunner:
         from ..datasets.base import OTBDataset
         from ..datasets.got10k import GOT10kDataset
         from ..datasets.lasot import LaSOTDataset
+        from ..datasets.synthetic import SyntheticDataset
 
         loaders = {
             "OTBDataset": OTBDataset,
             "GOT10kDataset": GOT10kDataset,
             "LaSOTDataset": LaSOTDataset,
+            "SyntheticDataset": SyntheticDataset,
         }
         loader_name = cfg.get("loader", "OTBDataset")
+        if loader_name not in loaders:
+            raise ValueError(
+                f"Unknown dataset loader '{loader_name}'. "
+                f"Available: {list(loaders)}"
+            )
+
+        if loader_name == "SyntheticDataset":
+            frame_size = cfg.get("frame_size", [320, 240])
+            bbox_size = cfg.get("bbox_size", [40, 40])
+            return SyntheticDataset(
+                num_sequences=cfg.get("num_sequences", 10),
+                num_frames=cfg.get("num_frames", 100),
+                frame_size=tuple(frame_size),
+                bbox_size=tuple(bbox_size),
+                motion=cfg.get("motion", "linear"),
+                seed=cfg.get("seed", 42),
+            )
+
         cls = loaders[loader_name]
         root = cfg["root"]
-
         if loader_name == "OTBDataset":
             return cls(root=root)
         split = cfg.get("split", "val")

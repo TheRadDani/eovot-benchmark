@@ -1,4 +1,4 @@
-"""Metrics sub-package — accuracy and efficiency evaluation."""
+"""Metrics sub-package — accuracy, robustness, and efficiency evaluation."""
 
 from .accuracy import (
     iou,
@@ -7,6 +7,7 @@ from .accuracy import (
     MetricsEngine,
 )
 from .robustness import RobustnessAnalyzer, RobustnessResult
+from .efficiency import EfficiencyEntry, EfficiencyMetricsEngine
 
 __all__ = [
     "iou",
@@ -15,4 +16,6 @@ __all__ = [
     "MetricsEngine",
     "RobustnessAnalyzer",
     "RobustnessResult",
+    "EfficiencyEntry",
+    "EfficiencyMetricsEngine",
 ]
