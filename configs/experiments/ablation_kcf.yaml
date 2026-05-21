@@ -1,0 +1,47 @@
+# Hyperparameter ablation study for the KCF tracker.
+#
+# Sweeps learning_rate over 8 candidate values while holding padding at its
+# base value.  The sensitivity analysis output will quantify how much
+# learning_rate affects success AUC — use this to justify your final choice.
+#
+# Run:
+#   python scripts/run_ablation.py --config configs/experiments/ablation_kcf.yaml
+#
+# Results are saved to:
+#   results/ablations/kcf-learning-rate-ablation/
+#     ablation_results.json
+#     ablation_table.md
+#     sensitivity_analysis.md
+
+experiment:
+  name: "kcf-learning-rate-ablation"
+  seed: 42
+  # Set tdp_watts to your device TDP (e.g. 6.0 for RPi4) to include energy.
+  tdp_watts: null
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic
+  num_sequences: 8
+  num_frames: 120
+  motion: linear
+  seed: 42
+
+ablation:
+  tracker: KCF
+
+  # Base parameter values — used as defaults and as the "held" values during
+  # one-at-a-time sensitivity analysis.
+  base_params:
+    learning_rate: 0.125
+    padding: 1.5
+    lambda_: 0.0001
+    kernel_sigma: 0.5
+
+  # Grid: Cartesian product of all lists is evaluated.
+  # Keep grid small for fast sweeps; expand for publication-quality results.
+  grid:
+    learning_rate: [0.025, 0.050, 0.075, 0.100, 0.125, 0.150, 0.175, 0.200]
+
+  # Set to an integer for a quick smoke test (e.g. 3 sequences per config).
+  max_sequences: null
