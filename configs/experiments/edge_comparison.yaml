@@ -1,0 +1,55 @@
+# Edge-aware multi-tracker comparison with device projection.
+#
+# Evaluates MOSSE and KCF on a synthetic dataset, then projects the measured
+# host-machine performance onto five edge hardware targets using the built-in
+# DeviceSimulator profiles.
+#
+# Run:
+#   python scripts/run_experiment.py --config configs/experiments/edge_comparison.yaml
+#
+# Outputs in results/experiments/edge-tracker-comparison/:
+#   leaderboard.md        — accuracy + EES leaderboard
+#   edge_leaderboard.md   — EES ranking + per-device projected FPS tables
+#   edge_projection.json  — raw device projection data
+#   MOSSE-Synthetic.json  — full per-sequence MOSSE results
+#   KCF-Synthetic.json    — full per-sequence KCF results
+
+experiment:
+  name: "edge-tracker-comparison"
+  seed: 42
+  # Set to your device's CPU TDP for real energy measurements.
+  # Examples: 6.0 (RPi4), 10.0 (Jetson Nano), 15.0 (laptop/Jetson Xavier NX)
+  tdp_watts: null
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic
+  num_sequences: 10
+  num_frames: 150
+  motion: linear
+  seed: 42
+
+trackers:
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+      sigma: 2.0
+
+  - name: KCF
+    params:
+      learning_rate: 0.100
+
+# Edge deployment analysis.
+# Remove or set to null to skip device projection.
+edge_profile:
+  # Subset of built-in device profiles to simulate.
+  # Available: rpi4, rpi5, jetson_nano, jetson_xnx, coral_board, snapdragon888
+  # Set to null to simulate all registered devices.
+  devices: [rpi4, rpi5, jetson_nano, jetson_xnx, coral_board]
+
+  # Seconds of continuous tracking — longer values apply stronger thermal throttling.
+  sustained_seconds: 120.0
+
+  # Memory budget (MB) for EES computation — soft ceiling for the memory penalty term.
+  # Set to match your target device's RAM minus OS overhead.
+  memory_budget_mb: 512.0
