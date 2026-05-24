@@ -10,6 +10,7 @@ import numpy as np
 from ..datasets.base import BaseDataset, Sequence
 from ..metrics.accuracy import AccuracyMetrics, MetricsEngine
 from ..profiling.energy import EnergyProfiler, EnergyResult
+from ..profiling.gpu_profiler import GPUProfiler, GPUProfilingResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
 
@@ -24,6 +25,7 @@ class SequenceResult:
     center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
     energy: Optional[EnergyResult] = None          # energy estimate; None when TDP not configured
     accuracy_metrics: Optional[AccuracyMetrics] = None  # success AUC, precision AUC
+    gpu_profiling: Optional[GPUProfilingResult] = None  # GPU metrics; None when not profiling
 
     @property
     def mean_iou(self) -> float:
@@ -182,12 +184,20 @@ class BenchmarkEngine:
             laptop).  Default: ``None`` (energy profiling disabled).
     """
 
-    def __init__(self, verbose: bool = True, tdp_watts: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        verbose: bool = True,
+        tdp_watts: Optional[float] = None,
+        gpu_device_id: Optional[int] = None,
+    ) -> None:
         self.verbose = verbose
         self._metrics = MetricsEngine()
         self._profiler = Profiler()
         self._energy_profiler: Optional[EnergyProfiler] = (
             EnergyProfiler(tdp_watts=tdp_watts) if tdp_watts is not None else None
+        )
+        self._gpu_profiler: Optional[GPUProfiler] = (
+            GPUProfiler(device_id=gpu_device_id) if gpu_device_id is not None else None
         )
 
     def run(
@@ -203,7 +213,15 @@ class BenchmarkEngine:
 
         if self.verbose:
             energy_tag = f"  [energy TDP={self._energy_profiler.tdp_watts}W]" if self._energy_profiler else ""
-            print(f"\nEvaluating {tracker.name} on {dataset_name} ({n} sequences){energy_tag}")
+            gpu_tag = (
+                f"  [GPU:{self._gpu_profiler.device_name}]"
+                if self._gpu_profiler and self._gpu_profiler.gpu_available
+                else ""
+            )
+            print(
+                f"\nEvaluating {tracker.name} on {dataset_name} "
+                f"({n} sequences){energy_tag}{gpu_tag}"
+            )
             print("-" * 60)
 
         for idx in range(n):
@@ -235,6 +253,8 @@ class BenchmarkEngine:
         self._profiler.reset()
         if self._energy_profiler is not None:
             self._energy_profiler.reset()
+        if self._gpu_profiler is not None:
+            self._gpu_profiler.reset()
 
         frames = list(seq)
         gt = seq.ground_truth
@@ -248,10 +268,14 @@ class BenchmarkEngine:
                 self._profiler.start_frame()
                 if self._energy_profiler is not None:
                     self._energy_profiler.start_frame()
+                if self._gpu_profiler is not None:
+                    self._gpu_profiler.start_frame()
                 bbox = tracker.update(frame)
                 self._profiler.end_frame()
                 if self._energy_profiler is not None:
                     self._energy_profiler.end_frame()
+                if self._gpu_profiler is not None:
+                    self._gpu_profiler.end_frame()
                 preds.append(bbox)
 
         preds_arr = np.array(preds, dtype=np.float64)
@@ -274,6 +298,10 @@ class BenchmarkEngine:
             except ValueError:
                 pass  # sequence too short (0 update frames)
 
+        gpu_result: Optional[GPUProfilingResult] = None
+        if self._gpu_profiler is not None:
+            gpu_result = self._gpu_profiler.summary(tracker.name)
+
         return SequenceResult(
             sequence_name=seq.name,
             ious=ious,
@@ -283,4 +311,5 @@ class BenchmarkEngine:
             center_distances=dists,
             energy=energy,
             accuracy_metrics=accuracy,
+            gpu_profiling=gpu_result,
         )
