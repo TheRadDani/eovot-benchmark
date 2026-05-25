@@ -31,7 +31,7 @@ Example::
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -197,6 +197,156 @@ def plot_precision_curves(
         fig.savefig(output_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
         print(f"[plot] Precision curves saved → {output_path}")
+    else:
+        plt.show()
+
+
+def plot_device_fleet_heatmap(
+    sim_matrix: Dict[str, Dict[str, Any]],
+    device_names: List[str],
+    metric: str = "fps",
+    title: str = "Device Fleet Analysis",
+    output_path: Optional[str] = None,
+    figsize: Optional[tuple] = None,
+) -> None:
+    """Heatmap of tracker performance across a fleet of edge devices.
+
+    Rows are trackers, columns are devices, and cell colour encodes the
+    chosen metric.  Cells where the tracker exceeds device RAM are overlaid
+    with a hatch pattern (OOM indicator).
+
+    Args:
+        sim_matrix: Nested dict ``{tracker_name: {device_name: DeviceSimResult}}``.
+                    Produced by :meth:`~eovot.profiling.device_sim.DeviceSimulator.simulate_all`.
+        device_names: Ordered list of device keys to display (columns).
+        metric: Metric to encode.  One of ``"fps"``, ``"latency_ms"``,
+                ``"energy_mj"``, or ``"viability"`` (binary feasibility).
+        title: Figure title.
+        output_path: Save path.  Interactive display when ``None``.
+        figsize: Override figure size.  Auto-sized when ``None``.
+
+    Raises:
+        ImportError: If matplotlib is not installed.
+        ValueError: If *metric* is not one of the supported values.
+    """
+    _get_matplotlib()  # raises ImportError early if absent
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+
+    _valid_metrics = ("fps", "latency_ms", "energy_mj", "viability")
+    if metric not in _valid_metrics:
+        raise ValueError(f"metric must be one of {_valid_metrics}, got {metric!r}")
+
+    tracker_names = list(sim_matrix.keys())
+    n_trackers = len(tracker_names)
+    n_devices = len(device_names)
+
+    if figsize is None:
+        figsize = (max(8, n_devices * 2.0), max(3, n_trackers * 0.9 + 2))
+
+    data = np.zeros((n_trackers, n_devices), dtype=np.float64)
+    oom_mask = np.zeros((n_trackers, n_devices), dtype=bool)
+
+    for i, tracker in enumerate(tracker_names):
+        for j, device in enumerate(device_names):
+            r = sim_matrix[tracker].get(device)
+            if r is None:
+                oom_mask[i, j] = True
+                continue
+            if metric == "fps":
+                data[i, j] = r.estimated_fps
+            elif metric == "latency_ms":
+                data[i, j] = r.estimated_latency_ms
+            elif metric == "energy_mj":
+                data[i, j] = r.estimated_energy_mj_per_frame
+            else:  # viability
+                data[i, j] = 1.0 if (r.fits_in_memory and r.estimated_fps >= 5.0) else 0.0
+            oom_mask[i, j] = not r.fits_in_memory
+
+    cmap = (
+        "RdYlGn_r" if metric in ("latency_ms", "energy_mj")
+        else "RdYlGn"
+    )
+
+    fig, ax = plt.subplots(figsize=figsize)
+    im = ax.imshow(data, cmap=cmap, aspect="auto", vmin=0.0)
+
+    # OOM hatch overlay
+    for i in range(n_trackers):
+        for j in range(n_devices):
+            if oom_mask[i, j]:
+                ax.add_patch(mpatches.Rectangle(
+                    (j - 0.5, i - 0.5), 1, 1,
+                    fill=False, hatch="///",
+                    edgecolor="dimgray", linewidth=0.8,
+                ))
+
+    # Cell annotations
+    d_range = data.max() - data.min()
+    for i in range(n_trackers):
+        for j in range(n_devices):
+            r = sim_matrix.get(tracker_names[i], {}).get(device_names[j])
+            if metric == "viability":
+                text = "✓" if data[i, j] > 0.5 else "✗"
+            elif metric == "fps":
+                text = f"{data[i, j]:.1f}"
+            elif metric == "latency_ms":
+                text = f"{data[i, j]:.1f}"
+            else:
+                text = f"{data[i, j]:.2f}"
+            norm_val = (data[i, j] - data.min()) / (d_range + 1e-9)
+            # Use white text on dark cells, black on light — adjusted for
+            # direction of the colour map (lower-is-better maps are reversed)
+            if metric in ("latency_ms", "energy_mj"):
+                text_color = "white" if norm_val > 0.55 else "black"
+            else:
+                text_color = "white" if norm_val < 0.40 else "black"
+            ax.text(j, i, text, ha="center", va="center",
+                    fontsize=9, color=text_color, fontweight="bold")
+
+    # Device labels — use display_name from first tracker that has the device
+    device_labels = []
+    for d in device_names:
+        label = d
+        for tname in tracker_names:
+            r = sim_matrix.get(tname, {}).get(d)
+            if r is not None:
+                label = getattr(r, "display_name", d).split("(")[0].strip()
+                break
+        device_labels.append(label)
+
+    ax.set_xticks(range(n_devices))
+    ax.set_xticklabels(device_labels, rotation=30, ha="right", fontsize=9)
+    ax.set_yticks(range(n_trackers))
+    ax.set_yticklabels(tracker_names, fontsize=10)
+
+    metric_labels = {
+        "fps": "Estimated FPS",
+        "latency_ms": "Latency (ms/frame)",
+        "energy_mj": "Energy (mJ/frame)",
+        "viability": "Viable (FPS ≥ 5, fits RAM)",
+    }
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label(metric_labels.get(metric, metric), fontsize=10)
+
+    ax.set_title(title, fontsize=13, pad=12)
+
+    oom_patch = mpatches.Patch(
+        facecolor="white", edgecolor="dimgray", hatch="///",
+        label="OOM — exceeds device RAM",
+    )
+    ax.legend(
+        handles=[oom_patch],
+        loc="upper left", bbox_to_anchor=(0.0, -0.18),
+        fontsize=8, frameon=False,
+    )
+
+    fig.tight_layout()
+
+    if output_path:
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"[plot] Device fleet heatmap saved → {output_path}")
     else:
         plt.show()
 
