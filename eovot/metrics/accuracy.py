@@ -79,12 +79,22 @@ class AccuracyMetrics:
     precision_auc: float
     """Normalised AUC of the Precision Curve (distance thresholds 0 → 50 px)."""
 
+    normalized_precision_auc: float = 0.0
+    """Normalised AUC of the Normalized Precision Curve (TrackingNet/GOT-10k style).
+
+    The normalized precision divides the centre-distance by the square root of
+    the ground-truth box area before sweeping thresholds in ``[0, 0.5]``.
+    This makes the metric invariant to target scale, enabling fair comparison
+    across sequences with differently sized objects.
+    """
+
     def __str__(self) -> str:
         return (
             f"AccuracyMetrics("
             f"mIoU={self.mean_iou:.4f}, "
             f"success_AUC={self.success_auc:.4f}, "
-            f"precision_AUC={self.precision_auc:.4f})"
+            f"precision_AUC={self.precision_auc:.4f}, "
+            f"norm_precision_AUC={self.normalized_precision_auc:.4f})"
         )
 
 
@@ -196,6 +206,42 @@ class MetricsEngine:
         rates = np.array([(dists < t).mean() for t in thresholds])
         return thresholds, rates
 
+    def normalized_precision_curve(
+        self,
+        preds: np.ndarray,
+        gts: np.ndarray,
+        thresholds: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Scale-invariant normalized precision curve (TrackingNet / GOT-10k style).
+
+        The centre-distance between predicted and ground-truth box is divided by
+        ``sqrt(gt_w * gt_h)`` before thresholding, making the metric independent
+        of the absolute target size.  This allows fair comparison across
+        sequences that contain vastly different-sized objects.
+
+        Args:
+            preds:      ``(N, 4)`` predicted boxes in ``(x, y, w, h)`` format.
+            gts:        ``(N, 4)`` ground-truth boxes in ``(x, y, w, h)`` format.
+            thresholds: Normalized-distance thresholds to sweep.  Defaults to
+                        50 evenly spaced values in ``[0, 0.5]`` (canonical range).
+
+        Returns:
+            ``(thresholds, precision_rates)`` — both shape ``(T,)``.
+        """
+        if thresholds is None:
+            thresholds = np.linspace(0.0, 0.5, 51)
+        n = min(len(preds), len(gts))
+        norm_dists = np.empty(n, dtype=np.float64)
+        for i in range(n):
+            px, py, pw, ph = preds[i]
+            gx, gy, gw, gh = gts[i]
+            scale = float(np.sqrt(gw * gh)) if gw > 0 and gh > 0 else 1.0
+            dx = (px + pw / 2.0) - (gx + gw / 2.0)
+            dy = (py + ph / 2.0) - (gy + gh / 2.0)
+            norm_dists[i] = float(np.sqrt(dx * dx + dy * dy)) / max(scale, 1e-6)
+        rates = np.array([(norm_dists < t).mean() for t in thresholds])
+        return thresholds, rates
+
     def compute_all(
         self,
         preds: np.ndarray,
@@ -225,8 +271,12 @@ class MetricsEngine:
         thr_dist, pr = self.precision_curve(preds, gts)
         prec_auc = float(_trapz(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
 
+        thr_norm, npr = self.normalized_precision_curve(preds, gts)
+        norm_prec_auc = float(_trapz(npr, thr_norm) / thr_norm[-1]) if thr_norm[-1] > 0 else 0.0
+
         return AccuracyMetrics(
             mean_iou=float(ious.mean()),
             success_auc=success_auc,
             precision_auc=prec_auc,
+            normalized_precision_auc=norm_prec_auc,
         )
