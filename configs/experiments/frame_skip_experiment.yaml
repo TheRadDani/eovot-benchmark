@@ -1,0 +1,61 @@
+# Frame-skip accuracy–efficiency trade-off experiment
+#
+# Evaluates MOSSE and KCF trackers at three skip rates (1, 2, 3) to quantify
+# how adaptive frame skipping reduces compute load while trading off accuracy.
+# This is a key measurement for edge deployment decisions: a researcher can
+# read the leaderboard to answer "how much accuracy do I lose at half the
+# frame rate?"
+#
+# Usage:
+#   python scripts/run_experiment.py --config configs/experiments/frame_skip_experiment.yaml
+
+experiment:
+  name: frame_skip_tradeoff
+  description: >
+    Compares MOSSE and KCF wrapped at skip_rate 1 (baseline), 2, and 3.
+    Quantifies the accuracy-efficiency trade-off of adaptive frame skipping
+    for edge-constrained deployments.
+  output_dir: results/frame_skip_tradeoff
+  seed: 42
+
+dataset:
+  name: synthetic_linear
+  loader: synthetic
+  num_sequences: 10
+  num_frames: 100
+  motion: linear
+
+trackers:
+  - name: mosse_skip1
+    type: mosse
+    skip_rate: 1
+
+  - name: mosse_skip2
+    type: mosse
+    skip_rate: 2
+
+  - name: mosse_skip3
+    type: mosse
+    skip_rate: 3
+
+  - name: kcf_skip1
+    type: kcf
+    skip_rate: 1
+
+  - name: kcf_skip2
+    type: kcf
+    skip_rate: 2
+
+  - name: kcf_skip3
+    type: kcf
+    skip_rate: 3
+
+benchmark:
+  verbose: true
+  save_predictions: false
+
+reporting:
+  formats:
+    - json
+    - markdown
+  print_summary: true

@@ -3,6 +3,7 @@ from .mosse import MOSSETracker
 from .kcf import KCFTracker
 from .csrt import CSRTTracker
 from .median_flow import MedianFlowTracker
+from .frame_skip import FrameSkipTracker
 
 __all__ = [
     "BaseTracker",
@@ -11,4 +12,5 @@ __all__ = [
     "KCFTracker",
     "CSRTTracker",
     "MedianFlowTracker",
+    "FrameSkipTracker",
 ]
