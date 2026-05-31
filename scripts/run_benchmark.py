@@ -36,9 +36,9 @@ from eovot.datasets.got10k import GOT10kDataset
 from eovot.datasets.lasot import LaSOTDataset
 from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.mosse import MOSSETracker
-from eovot.trackers.kcf import KCFTracker
 from eovot.trackers.csrt import CSRTTracker
 from eovot.trackers.median_flow import MedianFlowTracker
+from eovot.trackers.scale_adaptive_mosse import ScaleAdaptiveMOSSETracker
 
 
 # ------------------------------------------------------------------ #
@@ -50,6 +50,7 @@ TRACKER_REGISTRY: Dict[str, Any] = {
     "KCF": KCFTracker,
     "CSRT": CSRTTracker,
     "MedianFlow": MedianFlowTracker,
+    "ScaleAdaptiveMOSSE": ScaleAdaptiveMOSSETracker,
 }
 
 

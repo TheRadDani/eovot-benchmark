@@ -1,0 +1,43 @@
+# Scale adaptation comparison experiment
+#
+# Compares MOSSE (fixed-scale) against ScaleAdaptiveMOSSE (scale-pyramid)
+# on the synthetic dataset so the experiment runs without downloading
+# real-world data.
+#
+# Run with:
+#   python scripts/run_experiment.py \
+#       --config configs/experiments/scale_adaptation_comparison.yaml
+#
+# Key research question:
+#   Does scale-pyramid search improve tracking accuracy on sequences
+#   where the target undergoes size changes?
+
+experiment:
+  name: "scale-adaptation-comparison"
+  seed: 42
+  tdp_watts: null
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-ScaleTest
+  num_sequences: 10
+  num_frames: 100
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  motion: "linear"
+  seed: 42
+
+trackers:
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+      sigma: 2.0
+
+  - name: ScaleAdaptiveMOSSE
+    params:
+      learning_rate: 0.125
+      sigma: 2.0
+      n_scales: 5
+      scale_step: 1.05
+      scale_lr: 0.35
+      psr_threshold: 6.0
