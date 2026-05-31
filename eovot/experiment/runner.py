@@ -275,6 +275,7 @@ class ExperimentRunner:
         from ..trackers.median_flow import MedianFlowTracker
         from ..trackers.mil import MILTracker
         from ..trackers.mosse import MOSSETracker
+        from ..trackers.scale_adaptive_mosse import ScaleAdaptiveMOSSETracker
 
         registry = {
             "MOSSE": MOSSETracker,
@@ -282,6 +283,7 @@ class ExperimentRunner:
             "CSRT": CSRTTracker,
             "MIL": MILTracker,
             "MedianFlow": MedianFlowTracker,
+            "ScaleAdaptiveMOSSE": ScaleAdaptiveMOSSETracker,
         }
         name = cfg["name"]
         if name not in registry:
