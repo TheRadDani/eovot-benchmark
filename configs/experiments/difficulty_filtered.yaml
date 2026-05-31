@@ -1,0 +1,40 @@
+# Difficulty-stratified benchmark experiment
+#
+# Demonstrates running trackers exclusively on sequences classified as
+# "hard" by the SequenceDifficultyAnalyzer.  This is useful for stress
+# testing, ablation studies, and understanding where each tracker fails.
+#
+# Run difficulty analysis first:
+#   python scripts/analyze_difficulty.py \
+#       --dataset-loader SyntheticDataset \
+#       --dataset-name Synthetic-Hard \
+#       --filter-tier hard
+#
+# Then run the benchmark experiment:
+#   python scripts/run_experiment.py \
+#       --config configs/experiments/difficulty_filtered.yaml
+
+experiment:
+  name: "hard-sequences-benchmark"
+  seed: 42
+  tdp_watts: null
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-Random
+  num_sequences: 20
+  num_frames: 120
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  motion: "random"
+  seed: 42
+
+trackers:
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+      sigma: 2.0
+
+  - name: KCF
+    params:
+      learning_rate: 0.125
