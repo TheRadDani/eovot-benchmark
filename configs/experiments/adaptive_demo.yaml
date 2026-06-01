@@ -1,0 +1,61 @@
+# EOVOT Adaptive Tracker Demo
+# ----------------------------
+# Compares a MOSSE baseline against AdaptiveTracker(MOSSE) to demonstrate
+# compute savings from confidence-gated frame skipping.
+#
+# Use this config to evaluate how much tracker compute can be saved on
+# video where the target moves slowly or is momentarily stationary.
+#
+# Run with:
+#   python scripts/run_experiment.py \
+#     --config configs/experiments/adaptive_demo.yaml
+#
+# Expected outcome:
+#   * AdaptiveTracker achieves similar IoU to raw MOSSE
+#   * Skip ratio reported in the JSON summary shows compute savings
+#
+# Tune the adaptive params below for your edge device's compute budget:
+#   motion_threshold    -- lower = more conservative skipping
+#   max_skip_streak     -- hard cap on consecutive skips (drift guard)
+#   confidence_threshold -- higher = skip only when very confident
+
+experiment:
+  name: "adaptive-tracker-comparison"
+  seed: 42
+  tdp_watts: 6.0   # Raspberry Pi 4 TDP for energy estimates
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-Linear
+  motion: linear
+  num_sequences: 10
+  num_frames: 100
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  seed: 42
+
+trackers:
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+      sigma: 2.0
+
+  # Adaptive wrapper around MOSSE with default edge-deployment settings.
+  # In the ExperimentRunner this maps to AdaptiveTracker(MOSSETracker(...)).
+  - name: Adaptive(MOSSE)
+    params:
+      inner_tracker: MOSSE
+      inner_params:
+        learning_rate: 0.125
+        sigma: 2.0
+      motion_threshold: 2.0
+      confidence_threshold: 0.6
+      confidence_window: 10
+      max_skip_streak: 5
+      use_velocity: true
+
+reporting:
+  formats:
+    - json
+    - csv
+    - markdown
