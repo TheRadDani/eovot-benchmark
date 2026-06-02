@@ -1,0 +1,70 @@
+# EOVOT — Resolution Scaling Accuracy vs Throughput Sweep
+# ---------------------------------------------------------
+# Benchmarks trackers at different input-frame scale factors to characterise
+# the spatial accuracy-vs-latency trade-off for edge deployment.
+#
+# Scale factors and their pixel-count implications:
+#   scale_factor=1.00 → 100% pixels  (full resolution baseline)
+#   scale_factor=0.75 →  56% pixels  (~1.6× throughput gain)
+#   scale_factor=0.50 →  25% pixels  (~3–4× throughput gain)
+#   scale_factor=0.25 →   6% pixels  (~8–12× throughput gain)
+#
+# Tip: for a quick interactive sweep use the script directly:
+#   python scripts/run_resolution_sweep.py --trackers MOSSE,KCF
+#
+# For full JSON/CSV output via the experiment runner:
+#   python scripts/run_experiment.py --config configs/experiments/resolution_sweep.yaml
+
+experiment:
+  name: "resolution-sweep"
+  seed: 42
+  tdp_watts: null
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-200
+  num_sequences: 10
+  num_frames: 200
+  frame_size: [320, 240]
+  bbox_size: [50, 50]
+  motion: linear
+  seed: 42
+
+trackers:
+  # --- MOSSE at each resolution level ---
+  - name: MOSSE
+    params: {}
+
+  - name: ResolutionScaler
+    params:
+      base_tracker: MOSSE
+      scale_factor: 0.75
+
+  - name: ResolutionScaler
+    params:
+      base_tracker: MOSSE
+      scale_factor: 0.5
+
+  - name: ResolutionScaler
+    params:
+      base_tracker: MOSSE
+      scale_factor: 0.25
+
+  # --- KCF at each resolution level ---
+  - name: KCF
+    params: {}
+
+  - name: ResolutionScaler
+    params:
+      base_tracker: KCF
+      scale_factor: 0.75
+
+  - name: ResolutionScaler
+    params:
+      base_tracker: KCF
+      scale_factor: 0.5
+
+  - name: ResolutionScaler
+    params:
+      base_tracker: KCF
+      scale_factor: 0.25
