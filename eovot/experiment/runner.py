@@ -269,14 +269,24 @@ class ExperimentRunner:
 
     @staticmethod
     def _build_tracker(cfg: Dict):
-        """Instantiate a tracker from a config dict."""
+        """Instantiate a tracker from a config dict.
+
+        For ``ResolutionScaler``, supply a ``base_tracker`` key inside
+        ``params`` naming the underlying tracker to wrap::
+
+            - name: ResolutionScaler
+              params:
+                base_tracker: KCF
+                scale_factor: 0.5
+        """
         from ..trackers.csrt import CSRTTracker
         from ..trackers.kcf import KCFTracker
         from ..trackers.median_flow import MedianFlowTracker
         from ..trackers.mil import MILTracker
         from ..trackers.mosse import MOSSETracker
+        from ..trackers.resolution_scaler import ResolutionScalerTracker
 
-        registry = {
+        base_registry = {
             "MOSSE": MOSSETracker,
             "KCF": KCFTracker,
             "CSRT": CSRTTracker,
@@ -284,9 +294,21 @@ class ExperimentRunner:
             "MedianFlow": MedianFlowTracker,
         }
         name = cfg["name"]
-        if name not in registry:
+        params = dict(cfg.get("params", {}) or {})
+
+        if name == "ResolutionScaler":
+            base_name = params.pop("base_tracker", "MOSSE")
+            if base_name not in base_registry:
+                raise ValueError(
+                    f"Unknown base_tracker '{base_name}' for ResolutionScalerTracker. "
+                    f"Available: {list(base_registry)}"
+                )
+            base = base_registry[base_name]()
+            return ResolutionScalerTracker(base, **params)
+
+        if name not in base_registry:
             raise ValueError(
-                f"Unknown tracker '{name}'. Available: {list(registry)}"
+                f"Unknown tracker '{name}'. "
+                f"Available: {list(base_registry) + ['ResolutionScaler']}"
             )
-        params = cfg.get("params", {}) or {}
-        return registry[name](**params)
+        return base_registry[name](**params)
