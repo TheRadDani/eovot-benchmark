@@ -46,7 +46,10 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..benchmark.engine import BenchmarkEngine
+import numpy as np
+
+from ..benchmark.engine import BenchmarkEngine, BenchmarkResult
+from ..profiling.profiler import ProfilingResult
 from ..reporting.reporter import BenchmarkReporter
 from .snapshot import ReproducibilitySnapshot
 
@@ -112,6 +115,7 @@ class ExperimentRunner:
         reporter = BenchmarkReporter(output_dir=str(exp_dir))
 
         all_results: List[Dict] = []
+        benchmark_results: Dict[str, BenchmarkResult] = {}
         run_timings: Dict[str, float] = {}
 
         for tracker_cfg in tracker_cfgs:
@@ -140,10 +144,21 @@ class ExperimentRunner:
             result_dict = result.to_dict()
             reporter.save_all(result_dict, name=f"{tracker_name}-{dataset_name}")
             all_results.append(result_dict)
+            benchmark_results[tracker_name] = result
 
         leaderboard = self._build_leaderboard(all_results)
         leaderboard_path = exp_dir / "leaderboard.md"
         leaderboard_path.write_text(leaderboard, encoding="utf-8")
+
+        device_report_output: Optional[Dict] = None
+        device_sim_cfg = exp_cfg.get("device_simulation", {})
+        if device_sim_cfg.get("enabled", False):
+            device_report_output = self._run_device_report(
+                all_results=all_results,
+                benchmark_results=benchmark_results,
+                device_sim_cfg=device_sim_cfg,
+                exp_dir=exp_dir,
+            )
 
         metadata: Dict[str, Any] = {
             "experiment": exp_name,
@@ -160,11 +175,124 @@ class ExperimentRunner:
             print(f"{'=' * 60}")
             print(leaderboard)
 
-        return {
+        output: Dict[str, Any] = {
             "metadata": metadata,
             "results": all_results,
             "leaderboard": leaderboard,
         }
+        if device_report_output is not None:
+            output["device_report"] = device_report_output
+        return output
+
+    # ------------------------------------------------------------------
+    # Device deployment report
+    # ------------------------------------------------------------------
+
+    def _run_device_report(
+        self,
+        all_results: List[Dict],
+        benchmark_results: Dict[str, BenchmarkResult],
+        device_sim_cfg: Dict[str, Any],
+        exp_dir: Path,
+    ) -> Dict[str, Any]:
+        """Project tracker profiling results onto an edge device fleet.
+
+        Uses live BenchmarkResult objects when available (trackers that ran
+        in this session) and reconstructs ProfilingResult from saved JSON for
+        any resumed tracker.
+
+        Args:
+            all_results: List of result dicts (may include resumed trackers).
+            benchmark_results: Live BenchmarkResult objects for this session.
+            device_sim_cfg: ``experiment.device_simulation`` config sub-dict.
+            exp_dir: Experiment output directory for writing report files.
+
+        Returns:
+            Dict with ``"markdown_path"`` and ``"json_path"`` keys.
+        """
+        from .device_report import DeviceReport
+
+        dr = DeviceReport(
+            devices=device_sim_cfg.get("devices"),
+            sustained_seconds=float(device_sim_cfg.get("sustained_seconds", 0.0)),
+            host_calibration_factor=float(
+                device_sim_cfg.get("host_calibration_factor", 1.0)
+            ),
+        )
+
+        # Build profiling map — prefer live objects, fall back to JSON reconstruction.
+        profiling_map: Dict[str, ProfilingResult] = {}
+        for r in all_results:
+            name = r.get("summary", {}).get("tracker", "")
+            if not name:
+                continue
+            if name in benchmark_results:
+                try:
+                    profiling_map[name] = benchmark_results[name].to_profiling_result()
+                except ValueError:
+                    pass
+            else:
+                prof = self._profiling_from_dict(r, name)
+                if prof is not None:
+                    profiling_map[name] = prof
+
+        if not profiling_map:
+            return {}
+
+        sim_results = dr.run(profiling_map)
+
+        md_path = exp_dir / "device_report.md"
+        md_path.write_text(dr.to_markdown(sim_results), encoding="utf-8")
+
+        json_path = exp_dir / "device_report.json"
+        with open(json_path, "w") as fh:
+            json.dump(dr.to_summary_dicts(sim_results), fh, indent=2)
+
+        if self.verbose:
+            print(f"\n  Device report → {md_path}")
+
+        return {
+            "markdown_path": str(md_path),
+            "json_path": str(json_path),
+        }
+
+    @staticmethod
+    def _profiling_from_dict(
+        result_dict: Dict, tracker_name: str
+    ) -> Optional[ProfilingResult]:
+        """Reconstruct an approximate ProfilingResult from a saved JSON dict.
+
+        Used for resumed trackers whose live BenchmarkResult is unavailable.
+        Latency is estimated from the per-sequence mean_latency_ms values
+        stored in the JSON.
+
+        Args:
+            result_dict: Dict in the format produced by BenchmarkResult.to_dict().
+            tracker_name: Name to embed in the returned ProfilingResult.
+
+        Returns:
+            Reconstructed ProfilingResult, or None if the dict lacks the
+            required fields.
+        """
+        summary = result_dict.get("summary", {})
+        seqs = result_dict.get("sequences", [])
+        if not seqs:
+            return None
+        latencies = [
+            float(s["mean_latency_ms"]) for s in seqs if "mean_latency_ms" in s
+        ]
+        if not latencies:
+            return None
+        mean_lat = float(np.mean(latencies))
+        return ProfilingResult(
+            tracker_name=tracker_name,
+            frame_count=len(seqs) * 100,  # rough estimate; frame_count not in summary
+            fps=1_000.0 / mean_lat if mean_lat > 0 else 0.0,
+            latency_mean_ms=mean_lat,
+            latency_std_ms=float(np.std(latencies)),
+            latency_p95_ms=float(np.percentile(latencies, 95)),
+            peak_memory_mb=float(summary.get("peak_memory_mb", 0.0)),
+        )
 
     # ------------------------------------------------------------------
     # Leaderboard generation

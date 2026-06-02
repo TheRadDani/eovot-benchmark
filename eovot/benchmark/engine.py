@@ -158,6 +158,54 @@ class BenchmarkResult:
             sequences.append(entry)
         return {"summary": self.summary(), "sequences": sequences}
 
+    def to_profiling_result(self) -> "ProfilingResult":
+        """Synthesize a representative ProfilingResult for device-fleet simulation.
+
+        Aggregates per-sequence profiling stats using a frame-count-weighted
+        mean for latency and the cross-sequence maximum for peak memory.
+        This is the format required by :class:`~eovot.profiling.device_sim.DeviceSimulator`.
+
+        Returns:
+            A single :class:`~eovot.profiling.profiler.ProfilingResult` that
+            represents the tracker's average hardware footprint across all
+            benchmarked sequences.
+
+        Raises:
+            ValueError: If there are no sequence results or no profiled frames.
+        """
+        if not self.sequence_results:
+            raise ValueError(
+                f"Cannot synthesize ProfilingResult for '{self.tracker_name}': "
+                "no sequence results."
+            )
+        total_frames = sum(r.profiling.frame_count for r in self.sequence_results)
+        if total_frames == 0:
+            raise ValueError(
+                f"Cannot synthesize ProfilingResult for '{self.tracker_name}': "
+                "zero profiled frames across all sequences."
+            )
+        # Frame-count-weighted mean latency gives a stable cross-sequence estimate.
+        weighted_latency_ms = (
+            sum(
+                r.profiling.latency_mean_ms * r.profiling.frame_count
+                for r in self.sequence_results
+            )
+            / total_frames
+        )
+        return ProfilingResult(
+            tracker_name=self.tracker_name,
+            frame_count=total_frames,
+            fps=1_000.0 / weighted_latency_ms if weighted_latency_ms > 0 else 0.0,
+            latency_mean_ms=weighted_latency_ms,
+            latency_std_ms=float(
+                np.mean([r.profiling.latency_std_ms for r in self.sequence_results])
+            ),
+            latency_p95_ms=float(
+                np.mean([r.profiling.latency_p95_ms for r in self.sequence_results])
+            ),
+            peak_memory_mb=self.peak_memory_mb,
+        )
+
     def __str__(self) -> str:
         s = self.summary()
         base = (

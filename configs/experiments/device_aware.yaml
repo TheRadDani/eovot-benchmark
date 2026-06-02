@@ -1,0 +1,60 @@
+# EOVOT — Device-Aware Deployment Analysis
+# -----------------------------------------
+# Benchmarks classical trackers on synthetic sequences and projects results
+# onto a fleet of common edge devices using DeviceSimulator.
+#
+# Output: results/experiments/device-deployment-analysis/
+#   ├── leaderboard.md          — standard accuracy + FPS ranking
+#   ├── device_report.md        — per-tracker, per-device projection table
+#   ├── device_report.json      — machine-readable version of the above
+#   └── <tracker>-Synthetic-100.{json,csv}   — full per-sequence data
+#
+# Usage:
+#   python scripts/run_experiment.py --config configs/experiments/device_aware.yaml
+
+experiment:
+  name: "device-deployment-analysis"
+  seed: 42
+  tdp_watts: 15.0           # host TDP for on-machine energy profiling
+
+  device_simulation:
+    enabled: true
+    # Subset of built-in profiles to project onto.
+    # Remove entries or set to null to use all six built-in devices.
+    devices:
+      - rpi4
+      - rpi5
+      - jetson_nano
+      - jetson_xnx
+      - coral_board
+    # Seconds of continuous tracking assumed on the target device.
+    # Controls thermal-throttling depth (0 = cold-start / burst scenario).
+    sustained_seconds: 60.0
+    # Set > 1.0 if your benchmark host is faster than a stock i7-10750H.
+    host_calibration_factor: 1.0
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-100
+  num_sequences: 5
+  num_frames: 100
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  motion: linear
+  seed: 42
+
+trackers:
+  - name: MOSSE
+    params: {}
+
+  - name: KCF
+    params: {}
+
+  - name: MedianFlow
+    params: {}
+
+  - name: MIL
+    params: {}
+
+  - name: CSRT
+    params: {}
