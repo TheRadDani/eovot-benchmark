@@ -1,0 +1,38 @@
+# Adaptive Frame Skip demo experiment
+# ------------------------------------
+# Compares a baseline MOSSE tracker against AdaptiveSkip(MOSSE) on a
+# synthetic dataset to demonstrate throughput gains on low-motion sequences.
+#
+# Run with:
+#   python scripts/run_experiment.py --config configs/experiments/adaptive_skip_demo.yaml
+
+experiment:
+  name: "adaptive-skip-demo"
+  seed: 42
+  tdp_watts: null
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-Linear
+  num_sequences: 10
+  num_frames: 150
+  frame_size: [320, 240]
+  bbox_size:  [40, 40]
+  motion: linear
+  seed: 42
+
+# Note: AdaptiveFrameSkipController is not yet in ExperimentRunner's tracker
+# registry.  To benchmark it, instantiate directly in a Python script:
+#
+#   from eovot.trackers.mosse import MOSSETracker
+#   from eovot.trackers.adaptive_skip import AdaptiveFrameSkipController
+#
+#   base    = MOSSETracker()
+#   tracker = AdaptiveFrameSkipController(base, skip_threshold=8.0, use_velocity=True)
+#
+# The config below benchmarks the plain MOSSE baseline for comparison.
+trackers:
+  - name: MOSSE
+    params: {}
+  - name: KCF
+    params: {}
