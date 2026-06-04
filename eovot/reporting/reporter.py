@@ -22,7 +22,11 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from ..benchmark.engine import BenchmarkResult
+    from ..metrics.attribute_metrics import AttributeMetricsEngine
 
 
 class BenchmarkReporter:
@@ -199,6 +203,56 @@ class BenchmarkReporter:
             fh.write(table)
             fh.write("\n")
         return path
+
+
+    def attribute_breakdown_table(
+        self,
+        result: "BenchmarkResult",
+        output_name: Optional[str] = None,
+    ) -> str:
+        """Build a Markdown per-attribute performance table from a BenchmarkResult.
+
+        Extracts :class:`~eovot.datasets.attributes.SequenceAttributes` stored
+        in each :class:`~eovot.benchmark.engine.SequenceResult` and aggregates
+        per-attribute IoU, Success AUC, and FPS.
+
+        Args:
+            result: Output of :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
+            output_name: If given, write the table to ``<output_dir>/<output_name>_attrs.md``.
+
+        Returns:
+            Multi-line Markdown string; also saved to disk when *output_name* is set.
+        """
+        from ..metrics.attribute_metrics import AttributeMetricsEngine
+
+        seq_results = result.sequence_results
+        attrs_map = {
+            r.sequence_name: r.attributes
+            for r in seq_results
+            if r.attributes is not None
+        }
+        if not attrs_map:
+            return "*(No attribute data available — enable compute_attributes in BenchmarkEngine)*\n"
+
+        ious_map = {r.sequence_name: r.ious for r in seq_results}
+        fps_map = {r.sequence_name: r.profiling.fps for r in seq_results}
+
+        engine = AttributeMetricsEngine()
+        perf = engine.compute(
+            sequence_names=[r.sequence_name for r in seq_results],
+            attributes_map=attrs_map,
+            ious_map=ious_map,
+            fps_map=fps_map,
+        )
+        table = engine.to_markdown_table(perf, tracker_name=result.tracker_name)
+
+        if output_name is not None:
+            path = self.output_dir / f"{output_name}_attrs.md"
+            with open(path, "w") as fh:
+                fh.write(f"# EOVOT Attribute Analysis — {result.tracker_name}\n\n")
+                fh.write(table)
+
+        return table
 
 
 def _json_default(obj: Any) -> Any:

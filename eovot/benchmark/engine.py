@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
+from ..datasets.attributes import SequenceAttributeAnalyzer, SequenceAttributes
 from ..datasets.base import BaseDataset, Sequence
 from ..metrics.accuracy import AccuracyMetrics, MetricsEngine
 from ..profiling.energy import EnergyProfiler, EnergyResult
@@ -24,6 +25,7 @@ class SequenceResult:
     center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
     energy: Optional[EnergyResult] = None          # energy estimate; None when TDP not configured
     accuracy_metrics: Optional[AccuracyMetrics] = None  # success AUC, precision AUC
+    attributes: Optional[SequenceAttributes] = None     # challenge attributes; None when GT unavailable
 
     @property
     def mean_iou(self) -> float:
@@ -182,12 +184,20 @@ class BenchmarkEngine:
             laptop).  Default: ``None`` (energy profiling disabled).
     """
 
-    def __init__(self, verbose: bool = True, tdp_watts: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        verbose: bool = True,
+        tdp_watts: Optional[float] = None,
+        compute_attributes: bool = True,
+    ) -> None:
         self.verbose = verbose
         self._metrics = MetricsEngine()
         self._profiler = Profiler()
         self._energy_profiler: Optional[EnergyProfiler] = (
             EnergyProfiler(tdp_watts=tdp_watts) if tdp_watts is not None else None
+        )
+        self._attr_analyzer: Optional[SequenceAttributeAnalyzer] = (
+            SequenceAttributeAnalyzer() if compute_attributes else None
         )
 
     def run(
@@ -274,6 +284,19 @@ class BenchmarkEngine:
             except ValueError:
                 pass  # sequence too short (0 update frames)
 
+        # Compute challenge attributes from GT trajectory + predictions.
+        attributes: Optional[SequenceAttributes] = None
+        if self._attr_analyzer is not None and len(gt_eval) > 0:
+            frame_size: Optional[tuple] = None
+            if len(frames) > 0:
+                h, w = frames[0].shape[:2]
+                frame_size = (w, h)
+            attributes = self._attr_analyzer.analyze(
+                gt_eval,
+                frame_size=frame_size,
+                predicted_boxes=preds_eval,
+            )
+
         return SequenceResult(
             sequence_name=seq.name,
             ious=ious,
@@ -283,4 +306,5 @@ class BenchmarkEngine:
             center_distances=dists,
             energy=energy,
             accuracy_metrics=accuracy,
+            attributes=attributes,
         )
