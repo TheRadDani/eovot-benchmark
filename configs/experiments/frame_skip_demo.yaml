@@ -1,0 +1,48 @@
+# Frame-Skip Analysis Demo
+# =========================
+# Evaluates how tracker accuracy degrades as we process fewer frames.
+# Answers: "What is the minimum frame rate needed for acceptable tracking?"
+#
+# Usage:
+#   python - <<'EOF'
+#   import json, pathlib
+#   from eovot.analysis.frame_skip import FrameSkipEvaluator
+#   from eovot.trackers.mosse import MOSSETracker
+#   from eovot.datasets.synthetic import SyntheticDataset
+#
+#   dataset   = SyntheticDataset(num_sequences=5, num_frames=120, motion="linear")
+#   evaluator = FrameSkipEvaluator(skip_rates=[1, 2, 4, 8], interpolation="hold_last")
+#   analysis  = evaluator.evaluate(MOSSETracker(), dataset, "Synthetic-Linear")
+#
+#   print(analysis.summary_table())
+#   pathlib.Path("frame_skip_results.json").write_text(
+#       json.dumps(analysis.to_dict(), indent=2)
+#   )
+#   EOF
+
+experiment:
+  name: frame_skip_demo
+  description: >
+    Temporal frame-skip sensitivity analysis — measures accuracy degradation
+    as a function of processing rate. Use this to set the minimum frame-rate
+    target for a given tracker on a given edge device.
+
+dataset:
+  loader: synthetic
+  num_sequences: 5
+  num_frames: 120
+  motion: linear   # linear | circular | random
+
+frame_skip:
+  skip_rates: [1, 2, 4, 8]
+  interpolation: hold_last   # hold_last | linear
+  failure_iou_threshold: 0.5
+  max_sequences: 5
+
+trackers:
+  - name: MOSSE
+  - name: KCF
+
+output:
+  results_dir: results/frame_skip_demo
+  formats: [json, markdown]
