@@ -24,6 +24,7 @@ class SequenceResult:
     center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
     energy: Optional[EnergyResult] = None          # energy estimate; None when TDP not configured
     accuracy_metrics: Optional[AccuracyMetrics] = None  # success AUC, precision AUC
+    confidence_scores: Optional[np.ndarray] = None  # shape (N-1,) — per-frame PSR confidence
 
     @property
     def mean_iou(self) -> float:
@@ -240,6 +241,7 @@ class BenchmarkEngine:
         gt = seq.ground_truth
         preds: List = []
 
+        confidences: List[float] = []
         for i, frame in enumerate(frames):
             if i == 0:
                 tracker.initialize(frame, seq.init_bbox)
@@ -248,11 +250,12 @@ class BenchmarkEngine:
                 self._profiler.start_frame()
                 if self._energy_profiler is not None:
                     self._energy_profiler.start_frame()
-                bbox = tracker.update(frame)
+                bbox, conf = tracker.update_with_confidence(frame)
                 self._profiler.end_frame()
                 if self._energy_profiler is not None:
                     self._energy_profiler.end_frame()
                 preds.append(bbox)
+                confidences.append(conf)
 
         preds_arr = np.array(preds, dtype=np.float64)
         n_eval = min(len(preds_arr), len(gt))
@@ -274,6 +277,10 @@ class BenchmarkEngine:
             except ValueError:
                 pass  # sequence too short (0 update frames)
 
+        conf_arr: Optional[np.ndarray] = None
+        if confidences and confidences[0] >= 0.0:
+            conf_arr = np.array(confidences, dtype=np.float32)
+
         return SequenceResult(
             sequence_name=seq.name,
             ious=ious,
@@ -283,4 +290,5 @@ class BenchmarkEngine:
             center_distances=dists,
             energy=energy,
             accuracy_metrics=accuracy,
+            confidence_scores=conf_arr,
         )

@@ -19,6 +19,11 @@ class BaseTracker(ABC):
     Bounding boxes use the ``(x, y, w, h)`` convention throughout, where
     ``(x, y)`` is the top-left corner.
 
+    Trackers that produce a native confidence signal (e.g. correlation filters
+    computing PSR) should also override :meth:`update_with_confidence` to expose
+    it without redundant computation.  The default implementation calls
+    :meth:`update` and returns a sentinel confidence of ``-1.0``.
+
     Example::
 
         class MyTracker(BaseTracker):
@@ -57,6 +62,28 @@ class BaseTracker(ABC):
             Predicted bounding box ``(x, y, w, h)``.
         """
         ...
+
+    def update_with_confidence(self, frame: np.ndarray) -> Tuple[BBox, float]:
+        """Predict the target location and return a confidence score.
+
+        The confidence is a scalar in ``[0, 1]`` where 1 means very certain
+        and 0 means the tracker has likely lost the target.
+
+        Trackers that derive a native confidence signal from their internal
+        state (e.g. PSR from a correlation filter response) should override
+        this method to return it efficiently.
+
+        The default implementation delegates to :meth:`update` and returns
+        ``-1.0`` as a sentinel indicating that no confidence is available.
+
+        Args:
+            frame: BGR image as a ``(H, W, 3)`` uint8 numpy array.
+
+        Returns:
+            Tuple ``(bbox, confidence)`` where ``bbox`` is ``(x, y, w, h)``
+            and ``confidence`` is in ``[0, 1]`` or ``-1.0`` if unsupported.
+        """
+        return self.update(frame), -1.0
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name={self.name!r})"
