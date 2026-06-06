@@ -181,13 +181,18 @@ class MOSSETracker(BaseTracker):
         """Extract a ``(h, w)`` patch from *gray*, resizing if needed.
 
         Clips coordinates to image boundaries so the patch is always
-        well-defined, even when the target is partially out of frame.
+        well-defined, even when the target is partially or fully out of frame.
+        Fully out-of-bounds coordinates yield a zero patch rather than
+        crashing cv2.resize with an empty source array.
         """
         ih, iw = gray.shape
         x1 = max(0, x)
         y1 = max(0, y)
         x2 = min(iw, x + w)
         y2 = min(ih, y + h)
+        if x2 <= x1 or y2 <= y1:
+            # Target has drifted entirely out of frame.
+            return np.zeros((h, w), dtype=gray.dtype)
         patch = gray[y1:y2, x1:x2]
         if patch.shape != (h, w):
             patch = cv2.resize(patch, (w, h), interpolation=cv2.INTER_LINEAR)
