@@ -14,6 +14,7 @@ import cv2
 import numpy as np
 
 from .base import BaseTracker, BBox
+from .confidence import compute_psr, psr_to_confidence
 
 
 class KCFTracker(BaseTracker):
@@ -68,6 +69,7 @@ class KCFTracker(BaseTracker):
         self._xf: Optional[np.ndarray] = None
         self._window: Optional[np.ndarray] = None
         self._yf: Optional[np.ndarray] = None
+        self._last_psr: float = 0.0
 
     # ------------------------------------------------------------------
     # Public BaseTracker interface
@@ -123,6 +125,8 @@ class KCFTracker(BaseTracker):
         kzf = self._kernel_corr(self._xf, zf)
         response = np.real(np.fft.ifft2(self._alphaf * kzf))
 
+        self._last_psr = compute_psr(response)
+
         dy, dx = np.unravel_index(np.argmax(response), response.shape)
         sh, sw = response.shape
         if dy > sh // 2:
@@ -147,6 +151,15 @@ class KCFTracker(BaseTracker):
         tw, th = self._target_sz
         return (new_cx - tw / 2.0, new_cy - th / 2.0, float(tw), float(th))
 
+    def update_with_confidence(self, frame: np.ndarray) -> Tuple[BBox, float]:
+        """Track and return PSR-derived confidence.
+
+        Returns:
+            ``(bbox, confidence)`` where confidence is in ``[0, 1]``.
+        """
+        bbox = self.update(frame)
+        return bbox, psr_to_confidence(self._last_psr)
+
     def reset(self) -> None:
         """Reset all internal state so the tracker can be re-initialised."""
         self._pos = None
@@ -156,6 +169,7 @@ class KCFTracker(BaseTracker):
         self._xf = None
         self._window = None
         self._yf = None
+        self._last_psr = 0.0
 
     # ------------------------------------------------------------------
     # Internal helpers

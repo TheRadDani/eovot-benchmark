@@ -1,5 +1,12 @@
 """Robustness metrics for visual object tracking evaluation.
 
+.. note::
+    This module also provides :class:`ConfidenceAwareRobustnessAnalyzer`, which
+    supplements IoU-based failure detection with PSR confidence scores produced
+    by correlation-filter trackers (MOSSE, KCF).  Using confidence enables
+    *early* failure warnings before IoU collapses to zero, giving edge systems
+    time to trigger re-initialization or fallback strategies.
+
 Implements VOT-challenge-style robustness analysis on top of per-frame IoU
 arrays produced by :class:`~eovot.benchmark.engine.BenchmarkEngine`:
 
@@ -32,7 +39,7 @@ Typical usage::
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -285,3 +292,205 @@ class RobustnessAnalyzer:
                 "mean_recovery_lag_frames": round(mean_lag, 2),
             },
         }
+
+
+@dataclass
+class ConfidenceRobustnessResult:
+    """Extended robustness result that includes confidence-signal statistics."""
+
+    base: RobustnessResult
+    """Standard IoU-based robustness result."""
+
+    mean_confidence: float
+    """Mean PSR-derived confidence over the sequence (excluding init frame)."""
+
+    min_confidence: float
+    """Minimum confidence observed — indicates worst-case response quality."""
+
+    confidence_failure_rate: float
+    """Fraction of frames where confidence fell below ``confidence_threshold``."""
+
+    early_warnings: List[int]
+    """Frame indices where confidence dropped below threshold *before* a
+    corresponding IoU failure was detected — true early warnings."""
+
+    def __str__(self) -> str:
+        return (
+            f"ConfidenceRobustnessResult[{self.base.tracker_name} on "
+            f"{self.base.sequence_name}] "
+            f"failures={self.base.num_failures}  EAO={self.base.eao:.4f}  "
+            f"mean_conf={self.mean_confidence:.3f}  "
+            f"early_warnings={len(self.early_warnings)}"
+        )
+
+
+class ConfidenceAwareRobustnessAnalyzer:
+    """Extends :class:`RobustnessAnalyzer` with PSR-confidence-based analysis.
+
+    Combines per-frame IoU arrays (from ground truth) with per-frame confidence
+    scores (from the tracker's internal state, e.g. PSR) to produce richer
+    robustness diagnostics:
+
+    * **Early warning detection** — identifies frames where confidence falls
+      before IoU collapses, enabling proactive re-initialization.
+    * **Confidence-failure rate** — fraction of frames below
+      ``confidence_threshold``.
+    * **Confidence–IoU correlation** — Pearson r between confidence and IoU,
+      quantifying how predictive PSR is for this tracker/dataset combination.
+
+    Args:
+        confidence_threshold: Normalised confidence below which a frame is
+            flagged as uncertain.  Default: ``0.3``.
+        failure_threshold:    IoU threshold forwarded to the underlying
+            :class:`RobustnessAnalyzer`.  Default: ``0.1``.
+        burn_in_frames:       Frames to skip at sequence start.  Default: ``5``.
+        early_warning_lead:   How many frames *before* an IoU failure a
+            confidence drop must occur to count as a true early warning.
+            Default: ``3``.
+
+    Example::
+
+        from eovot.metrics.robustness import ConfidenceAwareRobustnessAnalyzer
+
+        analyzer = ConfidenceAwareRobustnessAnalyzer()
+        result = analyzer.analyze(ious, confidence_scores,
+                                  tracker_name="MOSSE", sequence_name="car1")
+        print(result.early_warnings)
+        print(result.base.eao)
+    """
+
+    def __init__(
+        self,
+        confidence_threshold: float = 0.3,
+        failure_threshold: float = 0.1,
+        burn_in_frames: int = 5,
+        early_warning_lead: int = 3,
+    ) -> None:
+        self.confidence_threshold = confidence_threshold
+        self.early_warning_lead = early_warning_lead
+        self._base_analyzer = RobustnessAnalyzer(
+            failure_threshold=failure_threshold,
+            recovery_threshold=failure_threshold,
+            burn_in_frames=burn_in_frames,
+        )
+
+    def analyze(
+        self,
+        ious: np.ndarray,
+        confidence_scores: np.ndarray,
+        tracker_name: str = "",
+        sequence_name: str = "",
+    ) -> ConfidenceRobustnessResult:
+        """Run combined IoU + confidence analysis on a single sequence.
+
+        Args:
+            ious:             Per-frame IoU array, shape ``(N,)``.  Includes
+                              the initialisation frame (index 0, IoU ≈ 1).
+            confidence_scores: Per-update confidence scores, shape ``(N-1,)``.
+                              Index ``i`` corresponds to frame ``i+1`` in *ious*.
+            tracker_name:     Stored in the result for reporting.
+            sequence_name:    Stored in the result for reporting.
+
+        Returns:
+            :class:`ConfidenceRobustnessResult` with both IoU-based and
+            confidence-based statistics.
+        """
+        ious = np.asarray(ious, dtype=np.float64)
+        confidence_scores = np.asarray(confidence_scores, dtype=np.float64)
+
+        base = self._base_analyzer.analyze_sequence(ious, tracker_name, sequence_name)
+
+        burn = self._base_analyzer.burn_in_frames
+        # confidence_scores are 0-indexed to update frames (frame 1 onward).
+        conf_analysis = confidence_scores[max(0, burn - 1):]
+
+        mean_conf = float(conf_analysis.mean()) if len(conf_analysis) else 0.0
+        min_conf = float(conf_analysis.min()) if len(conf_analysis) else 0.0
+        conf_failure_rate = float(
+            np.mean(conf_analysis < self.confidence_threshold)
+        ) if len(conf_analysis) else 0.0
+
+        early_warnings = self._find_early_warnings(
+            ious, confidence_scores, base.failure_frames
+        )
+
+        return ConfidenceRobustnessResult(
+            base=base,
+            mean_confidence=mean_conf,
+            min_confidence=min_conf,
+            confidence_failure_rate=conf_failure_rate,
+            early_warnings=early_warnings,
+        )
+
+    def confidence_iou_correlation(
+        self,
+        ious: np.ndarray,
+        confidence_scores: np.ndarray,
+    ) -> float:
+        """Compute Pearson correlation between confidence scores and IoU.
+
+        A high positive correlation (r > 0.5) means PSR is a reliable proxy
+        for tracking quality on this sequence/dataset, validating its use for
+        autonomous failure detection.
+
+        Args:
+            ious:             Per-frame IoU array, shape ``(N,)``.
+            confidence_scores: Per-update confidence scores, shape ``(N-1,)``.
+
+        Returns:
+            Pearson r in ``[-1, 1]``, or ``0.0`` if inputs are too short or
+            have zero variance.
+        """
+        ious = np.asarray(ious, dtype=np.float64)
+        confidence_scores = np.asarray(confidence_scores, dtype=np.float64)
+
+        n = min(len(confidence_scores), len(ious) - 1)
+        if n < 2:
+            return 0.0
+
+        iou_aligned = ious[1 : n + 1]
+        conf_aligned = confidence_scores[:n]
+
+        if iou_aligned.std() < 1e-10 or conf_aligned.std() < 1e-10:
+            return 0.0
+
+        return float(np.corrcoef(iou_aligned, conf_aligned)[0, 1])
+
+    def _find_early_warnings(
+        self,
+        ious: np.ndarray,
+        confidence_scores: np.ndarray,
+        failure_frames: List[int],
+    ) -> List[int]:
+        """Identify frames where confidence dropped before an IoU failure.
+
+        A frame ``f_conf`` is an early warning if:
+        - confidence_scores[f_conf - 1] < confidence_threshold
+        - There exists an IoU failure at frame ``f_iou`` with
+          0 < f_iou - f_conf ≤ early_warning_lead
+
+        Args:
+            ious:           Per-frame IoU array.
+            confidence_scores: Per-update confidence scores (len = len(ious)-1).
+            failure_frames: Output of :meth:`RobustnessAnalyzer.detect_failures`.
+
+        Returns:
+            Sorted list of frame indices that qualify as early warnings.
+        """
+        if not failure_frames or len(confidence_scores) == 0:
+            return []
+
+        failure_set = set(failure_frames)
+        warnings: List[int] = []
+
+        for conf_frame in range(1, len(confidence_scores) + 1):
+            if conf_frame not in failure_set:
+                conf_val = confidence_scores[conf_frame - 1]
+                if conf_val < self.confidence_threshold:
+                    # Check if a failure follows within the lead window.
+                    for lead in range(1, self.early_warning_lead + 1):
+                        if (conf_frame + lead) in failure_set:
+                            warnings.append(conf_frame)
+                            break
+
+        return sorted(set(warnings))

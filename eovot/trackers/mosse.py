@@ -18,12 +18,13 @@ Design notes
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Tuple
 
 import cv2
 import numpy as np
 
 from .base import BaseTracker, BBox
+from .confidence import compute_psr, psr_to_confidence
 
 
 class MOSSETracker(BaseTracker):
@@ -72,6 +73,7 @@ class MOSSETracker(BaseTracker):
         self._H_conj: Optional[np.ndarray] = None  # conjugate of learned filter
         self._window: Optional[np.ndarray] = None   # cosine (Hann) window
         self._bbox: Optional[list] = None           # current [x, y, w, h]
+        self._last_psr: float = 0.0                 # PSR from the most recent update()
 
     # ------------------------------------------------------------------ #
     # BaseTracker interface                                                #
@@ -126,6 +128,9 @@ class MOSSETracker(BaseTracker):
         # Correlation response
         response = np.real(np.fft.ifft2(self._H_conj * Fi))
 
+        # Compute PSR before shifting — used by update_with_confidence().
+        self._last_psr = compute_psr(response)
+
         # Locate the peak
         ky, kx = np.unravel_index(response.argmax(), response.shape)
         # Shift: peak at (0,0) means no displacement
@@ -148,6 +153,20 @@ class MOSSETracker(BaseTracker):
             )
 
         return (float(x_new), float(y_new), float(w), float(h))
+
+    def update_with_confidence(self, frame: np.ndarray) -> Tuple[BBox, float]:
+        """Track and return PSR-derived confidence.
+
+        Calls :meth:`update` (which updates ``_last_psr``) and converts the
+        stored PSR to a ``[0, 1]`` confidence score via
+        :func:`~eovot.trackers.confidence.psr_to_confidence`.
+
+        Returns:
+            ``(bbox, confidence)`` where confidence is in ``[0, 1]``.
+        """
+        bbox = self.update(frame)
+        confidence = psr_to_confidence(self._last_psr)
+        return bbox, confidence
 
     # ------------------------------------------------------------------ #
     # Internal helpers                                                     #
