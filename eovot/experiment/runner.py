@@ -269,24 +269,31 @@ class ExperimentRunner:
 
     @staticmethod
     def _build_tracker(cfg: Dict):
-        """Instantiate a tracker from a config dict."""
-        from ..trackers.csrt import CSRTTracker
-        from ..trackers.kcf import KCFTracker
-        from ..trackers.median_flow import MedianFlowTracker
-        from ..trackers.mil import MILTracker
-        from ..trackers.mosse import MOSSETracker
+        """Instantiate a tracker from a config dict.
 
-        registry = {
-            "MOSSE": MOSSETracker,
-            "KCF": KCFTracker,
-            "CSRT": CSRTTracker,
-            "MIL": MILTracker,
-            "MedianFlow": MedianFlowTracker,
-        }
+        Delegates to :class:`~eovot.trackers.registry.TrackerRegistry` so
+        any tracker registered via ``TrackerRegistry.register()`` at runtime
+        (including third-party plugins) is automatically available in
+        experiment configs without modifying this method.
+
+        Optional ``scale_factor`` key wraps the tracker in a
+        :class:`~eovot.trackers.resolution_scaler.ResolutionScaledTracker`
+        for resolution-scaling experiments::
+
+            trackers:
+              - name: MOSSE
+                scale_factor: 0.5   # run at half resolution
+                params: {}
+        """
+        from ..trackers.registry import TrackerRegistry
+        from ..trackers.resolution_scaler import ResolutionScaledTracker
+
         name = cfg["name"]
-        if name not in registry:
-            raise ValueError(
-                f"Unknown tracker '{name}'. Available: {list(registry)}"
-            )
         params = cfg.get("params", {}) or {}
-        return registry[name](**params)
+        tracker = TrackerRegistry.create(name, **params)
+
+        scale_factor = cfg.get("scale_factor", None)
+        if scale_factor is not None and float(scale_factor) != 1.0:
+            tracker = ResolutionScaledTracker(tracker, scale_factor=float(scale_factor))
+
+        return tracker

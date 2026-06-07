@@ -1,0 +1,69 @@
+# Resolution Scaling Experiment for EOVOT
+#
+# Evaluates the accuracy-efficiency Pareto front of MOSSE and KCF across
+# four input resolutions: 100%, 75%, 50%, and 25% of original frame size.
+#
+# Each tracker variant is wrapped with ResolutionScaledTracker via the
+# `scale_factor` key (supported since the tracker-registry PR).
+#
+# Usage:
+#   python scripts/run_experiment.py --config configs/experiments/resolution_scaling.yaml
+#
+# Expected output (synthetic dataset, 10 sequences, 100 frames each):
+#   - MOSSE@100% : highest accuracy, moderate FPS
+#   - MOSSE@50%  : 2–4× FPS gain, modest IoU drop (~5–10 pp)
+#   - MOSSE@25%  : maximum FPS, significant IoU drop
+#   - KCF@50%    : strong accuracy-efficiency tradeoff
+#
+# For real datasets replace `loader: SyntheticDataset` with OTBDataset / GOT10kDataset
+# and set `root` accordingly.
+
+experiment:
+  name: "resolution-scaling"
+  seed: 42
+  tdp_watts: null   # set to device TDP (e.g. 7.5 for RPi4) for energy profiling
+
+dataset:
+  loader: SyntheticDataset
+  num_sequences: 10
+  num_frames: 100
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  motion: linear
+  seed: 42
+  name: Synthetic-320x240
+
+trackers:
+  # ---- MOSSE at four resolutions ----
+  - name: MOSSE
+    scale_factor: 1.0   # baseline: full resolution
+    params: {}
+
+  - name: MOSSE
+    scale_factor: 0.75
+    params: {}
+
+  - name: MOSSE
+    scale_factor: 0.5
+    params: {}
+
+  - name: MOSSE
+    scale_factor: 0.25
+    params: {}
+
+  # ---- KCF at four resolutions ----
+  - name: KCF
+    scale_factor: 1.0
+    params: {}
+
+  - name: KCF
+    scale_factor: 0.75
+    params: {}
+
+  - name: KCF
+    scale_factor: 0.5
+    params: {}
+
+  - name: KCF
+    scale_factor: 0.25
+    params: {}
