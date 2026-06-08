@@ -2,5 +2,11 @@
 
 from .runner import ExperimentRunner
 from .snapshot import ReproducibilitySnapshot
+from .grid_search import GridSearchEngine, GridSearchEntry
 
-__all__ = ["ExperimentRunner", "ReproducibilitySnapshot"]
+__all__ = [
+    "ExperimentRunner",
+    "ReproducibilitySnapshot",
+    "GridSearchEngine",
+    "GridSearchEntry",
+]
