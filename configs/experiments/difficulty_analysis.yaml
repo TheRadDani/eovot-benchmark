@@ -1,0 +1,55 @@
+# EOVOT — Difficulty-Stratified Benchmark Example
+#
+# Runs multiple trackers on a synthetic dataset, then breaks down performance
+# by sequence difficulty (easy / medium / hard) using SequenceDifficultyAnalyzer.
+#
+# Quick start:
+#   python scripts/run_experiment.py --config configs/experiments/difficulty_analysis.yaml
+
+experiment:
+  name: "difficulty-stratified-analysis"
+  seed: 42
+  tdp_watts: null    # set to device TDP (e.g. 6.0 for RPi 4) to enable energy profiling
+
+dataset:
+  loader: SyntheticDataset
+  name: SyntheticMixed
+  # Mix of slow-motion and fast-motion sequences to produce easy + hard buckets
+  num_sequences: 20
+  num_frames: 80
+  frame_size: [320, 240]
+  bbox_size:  [50, 40]
+  motion: random      # SyntheticDataset motion pattern: linear | circular | random
+
+trackers:
+  - name: MOSSE
+    params: {}
+  - name: KCF
+    params:
+      learning_rate: 0.125
+  - name: CSRT
+    params: {}
+
+benchmark:
+  verbose: true
+  save_predictions: false
+
+reporting:
+  formats: ["json", "csv"]
+  print_summary: true
+
+# After running the experiment, perform difficulty analysis in Python:
+#
+#   from eovot.metrics.difficulty import SequenceDifficultyAnalyzer
+#   from eovot.datasets.synthetic import SyntheticDataset
+#
+#   dataset = SyntheticDataset(num_sequences=20, num_frames=80, motion="random", seed=42)
+#   analyzer = SequenceDifficultyAnalyzer()
+#   reports = analyzer.analyze_dataset(dataset)
+#
+#   # Attribute breakdown per tracker
+#   breakdowns = [
+#       analyzer.performance_by_difficulty(result, dataset)
+#       for result in benchmark_results
+#   ]
+#   print(SequenceDifficultyAnalyzer.to_markdown_table(breakdowns))

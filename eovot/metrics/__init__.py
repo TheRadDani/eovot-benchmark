@@ -1,4 +1,4 @@
-"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, and statistical testing."""
+"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, and difficulty analysis."""
 
 from .accuracy import (
     iou,
@@ -14,6 +14,11 @@ from .statistical import (
     WilcoxonResult,
     PairwiseSummary,
     StatisticalTestEngine,
+)
+from .difficulty import (
+    DifficultyReport,
+    AttributeBreakdown,
+    SequenceDifficultyAnalyzer,
 )
 
 __all__ = [
@@ -31,4 +36,7 @@ __all__ = [
     "WilcoxonResult",
     "PairwiseSummary",
     "StatisticalTestEngine",
+    "DifficultyReport",
+    "AttributeBreakdown",
+    "SequenceDifficultyAnalyzer",
 ]
