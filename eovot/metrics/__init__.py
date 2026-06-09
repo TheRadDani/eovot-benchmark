@@ -1,4 +1,4 @@
-"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, and statistical testing."""
+"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, and error budget analysis."""
 
 from .accuracy import (
     iou,
@@ -14,6 +14,12 @@ from .statistical import (
     WilcoxonResult,
     PairwiseSummary,
     StatisticalTestEngine,
+)
+from .error_budget import (
+    FrameErrorBudget,
+    ErrorBudget,
+    AggregateErrorBudget,
+    ErrorBudgetAnalyzer,
 )
 
 __all__ = [
@@ -31,4 +37,8 @@ __all__ = [
     "WilcoxonResult",
     "PairwiseSummary",
     "StatisticalTestEngine",
+    "FrameErrorBudget",
+    "ErrorBudget",
+    "AggregateErrorBudget",
+    "ErrorBudgetAnalyzer",
 ]
