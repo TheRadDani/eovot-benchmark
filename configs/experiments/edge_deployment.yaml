@@ -1,0 +1,67 @@
+# Edge Deployment Experiment — EOVOT
+#
+# Benchmarks the AdaptiveResolutionTracker wrapping a MOSSE base tracker,
+# targeting a Raspberry Pi 4 power envelope (TDP ~6 W).
+#
+# Usage:
+#   python scripts/run_benchmark.py --config configs/experiments/edge_deployment.yaml
+#
+# The adaptive tracker automatically downscales frames when the tracked
+# target is stable, reducing CPU load at the cost of a small IoU penalty.
+# Compare results against the plain MOSSE baseline (classical_comparison.yaml)
+# to quantify the accuracy/efficiency trade-off.
+
+experiment:
+  name: edge-adaptive-mosse-otb
+  description: >
+    Evaluate AdaptiveResolutionTracker(MOSSE) on OTB-100 sequences under
+    a Raspberry Pi 4 energy budget.  Demonstrates the speed-accuracy
+    trade-off of dynamic resolution scaling on edge hardware.
+  output_dir: results/edge/
+  seed: 42
+
+dataset:
+  name: OTB100
+  loader: OTBDataset
+  root: /data/OTB100            # override with --dataset-root
+  max_sequences: null           # evaluate full dataset; use an integer for quick runs
+
+tracker:
+  name: AdaptiveMOSSE
+  base: MOSSE
+  params:
+    # MOSSE base tracker hyper-parameters
+    learning_rate: 0.125
+    sigma: 2.0
+    # Adaptive resolution policy
+    scale_low: 1.0              # full resolution when confidence is low
+    scale_medium: 0.75          # 75% resolution at medium confidence
+    scale_high: 0.5             # 50% resolution when tracking is confident
+    conf_high_thresh: 0.65      # above this -> activate high (small) scale
+    conf_low_thresh: 0.35       # below this -> fall back to full resolution
+    hysteresis_frames: 3        # frames before scale switch is committed
+    history_window: 5           # smoothing window for confidence signal
+
+benchmark:
+  verbose: true
+  save_predictions: false
+
+profiling:
+  # Use Raspberry Pi 4 TDP for energy estimates; set null to disable.
+  # Values for other devices: jetson_nano=10, laptop=15, desktop=125.
+  tdp_watts: 6.0
+  hardware_profile: rpi4        # maps to eovot.profiling.hardware_profiles
+
+reporting:
+  formats: [json, csv, markdown]
+  print_summary: true
+  edge_score:
+    # Reference baselines for EdgeScore normalisation
+    fps_ref: 30.0               # 30 FPS = real-time threshold for edge devices
+    mem_ref_mb: 256.0           # 256 MB = conservative RPi4 memory budget
+    energy_ref_mj: 5.0          # 5 mJ/frame = baseline KCF energy on RPi4
+    weights:
+      iou: 4.0                  # accuracy weighted highest for tracking quality
+      fps: 2.0
+      memory: 2.0
+      energy: 2.0
