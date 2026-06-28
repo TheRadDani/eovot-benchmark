@@ -1,4 +1,4 @@
-"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, and statistical testing."""
+"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, and challenge attributes."""
 
 from .accuracy import (
     iou,
@@ -14,6 +14,18 @@ from .statistical import (
     WilcoxonResult,
     PairwiseSummary,
     StatisticalTestEngine,
+)
+from .challenge import (
+    ATTRIBUTES as CHALLENGE_ATTRIBUTES,
+    FM,
+    SV,
+    LR,
+    ARC,
+    OV,
+    SequenceAttributeLabels,
+    AttributeAccuracy,
+    ChallengeDetector,
+    ChallengeAnalyzer,
 )
 
 __all__ = [
@@ -31,4 +43,14 @@ __all__ = [
     "WilcoxonResult",
     "PairwiseSummary",
     "StatisticalTestEngine",
+    "CHALLENGE_ATTRIBUTES",
+    "FM",
+    "SV",
+    "LR",
+    "ARC",
+    "OV",
+    "SequenceAttributeLabels",
+    "AttributeAccuracy",
+    "ChallengeDetector",
+    "ChallengeAnalyzer",
 ]
