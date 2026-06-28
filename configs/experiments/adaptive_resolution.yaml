@@ -1,0 +1,105 @@
+# Experiment: Adaptive Dynamic Resolution Tracker (ADRT) Benchmark
+#
+# This configuration benchmarks ADRT wrappers around MOSSE and KCF at
+# different target-FPS budgets on synthetic sequences.  The goal is to
+# quantify the accuracy–throughput trade-off of compute-adaptive inference
+# on resource-constrained edge devices.
+#
+# Usage:
+#   python scripts/run_experiment.py --config configs/experiments/adaptive_resolution.yaml
+#
+# Expected output:
+#   - JSON / CSV / Markdown comparison table (outputs/adaptive_resolution/)
+#   - Per-tracker FPS, mIoU, and Edge Efficiency Score
+#   - Scale-history summaries showing adaptation dynamics
+
+experiment:
+  name: adaptive_resolution_benchmark
+  seed: 42
+  # Set TDP to a Raspberry Pi 4-class value for energy estimates
+  tdp_watts: 7.5
+
+dataset:
+  loader: SyntheticDataset
+  root: null                    # in-memory; no download required
+  name: Synthetic-100
+  n_sequences: 20
+  n_frames: 120
+  motion: random                # mixed-motion sequences stress-test the controller
+
+trackers:
+  # ── Baseline: unmodified fast trackers ─────────────────────────────────
+  - name: MOSSETracker
+    params: {}
+
+  - name: KCFTracker
+    params:
+      learning_rate: 0.075
+      padding: 1.5
+
+  # ── ADRT wrapping MOSSE at three throughput targets ────────────────────
+  # High-quality mode — scale freely up to 1.0 with a relaxed target
+  - name: AdaptiveResolutionTracker
+    display_name: ADRT-MOSSE-HighQ
+    params:
+      tracker:
+        name: MOSSETracker
+        params: {}
+      target_fps: 20.0
+      min_scale: 0.50
+      max_scale: 1.00
+      control_gain: 0.5
+      smoothing: 0.85
+
+  # Balanced mode — targets 40 FPS, halves min_scale for more headroom
+  - name: AdaptiveResolutionTracker
+    display_name: ADRT-MOSSE-Balanced
+    params:
+      tracker:
+        name: MOSSETracker
+        params: {}
+      target_fps: 40.0
+      min_scale: 0.35
+      max_scale: 1.00
+      control_gain: 0.5
+      smoothing: 0.85
+
+  # Edge mode — aggressive budget (100 FPS), very low minimum scale
+  - name: AdaptiveResolutionTracker
+    display_name: ADRT-MOSSE-Edge
+    params:
+      tracker:
+        name: MOSSETracker
+        params: {}
+      target_fps: 100.0
+      min_scale: 0.25
+      max_scale: 1.00
+      control_gain: 0.7
+      smoothing: 0.90
+
+  # ── ADRT wrapping KCF ──────────────────────────────────────────────────
+  - name: AdaptiveResolutionTracker
+    display_name: ADRT-KCF-Balanced
+    params:
+      tracker:
+        name: KCFTracker
+        params:
+          learning_rate: 0.075
+          padding: 1.5
+      target_fps: 30.0
+      min_scale: 0.35
+      max_scale: 1.00
+      control_gain: 0.5
+      smoothing: 0.85
+
+benchmark:
+  verbose: true
+  tdp_watts: 7.5
+
+reporting:
+  output_dir: outputs/adaptive_resolution
+  formats:
+    - json
+    - csv
+    - markdown
+  print_summary: true
