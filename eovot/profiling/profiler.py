@@ -13,14 +13,25 @@ import psutil
 
 @dataclass
 class ProfilingResult:
-    """Hardware profiling summary for one tracker run."""
+    """Hardware profiling summary for one tracker run.
+
+    Latency percentiles expose the full tail distribution — essential for
+    hard real-time edge systems where mean latency underestimates the
+    worst-case frame budget:
+
+    * ``latency_p50_ms`` — median; robust centre of the distribution.
+    * ``latency_p95_ms`` — 1 in 20 frames exceed this; soft real-time bound.
+    * ``latency_p99_ms`` — 1 in 100 frames exceed this; hard real-time bound.
+    """
 
     tracker_name: str
     frame_count: int
     fps: float
     latency_mean_ms: float
     latency_std_ms: float
+    latency_p50_ms: float
     latency_p95_ms: float
+    latency_p99_ms: float
     peak_memory_mb: float
 
     def __str__(self) -> str:
@@ -28,7 +39,9 @@ class ProfilingResult:
             f"ProfilingResult[{self.tracker_name}] "
             f"FPS={self.fps:.1f}  "
             f"latency={self.latency_mean_ms:.2f}±{self.latency_std_ms:.2f} ms  "
+            f"p50={self.latency_p50_ms:.2f} ms  "
             f"p95={self.latency_p95_ms:.2f} ms  "
+            f"p99={self.latency_p99_ms:.2f} ms  "
             f"mem={self.peak_memory_mb:.1f} MiB  "
             f"frames={self.frame_count}"
         )
@@ -70,7 +83,9 @@ class Profiler:
             fps=1_000.0 / mean_ms if mean_ms > 0 else float("inf"),
             latency_mean_ms=mean_ms,
             latency_std_ms=float(arr.std()),
+            latency_p50_ms=float(np.percentile(arr, 50)),
             latency_p95_ms=float(np.percentile(arr, 95)),
+            latency_p99_ms=float(np.percentile(arr, 99)),
             peak_memory_mb=self._peak_memory_mb,
         )
 

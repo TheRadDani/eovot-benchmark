@@ -29,7 +29,9 @@ def _make_profiling_result(
         fps=fps,
         latency_mean_ms=latency_mean_ms,
         latency_std_ms=0.5,
+        latency_p50_ms=latency_mean_ms * 0.95,
         latency_p95_ms=latency_mean_ms * 1.3,
+        latency_p99_ms=latency_mean_ms * 1.6,
         peak_memory_mb=peak_memory_mb,
     )
 
