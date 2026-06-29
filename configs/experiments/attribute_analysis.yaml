@@ -1,0 +1,72 @@
+# EOVOT Attribute Analysis Experiment
+#
+# Evaluates multiple trackers and breaks down performance per challenge
+# attribute (fast_motion, scale_variation, occlusion, etc.) to reveal
+# WHERE each tracker excels or fails.
+#
+# Run with:
+#   python scripts/analyze_attributes.py \
+#       --trackers MOSSE KCF CSRT \
+#       --dataset synthetic \
+#       --num-sequences 30 --num-frames 200 \
+#       --output-dir results/attribute_analysis
+#
+# For real datasets:
+#   python scripts/analyze_attributes.py \
+#       --trackers MOSSE KCF CSRT \
+#       --dataset otb \
+#       --dataset-root /data/OTB100 \
+#       --output-dir results/attribute_analysis
+
+experiment:
+  name: "attribute-analysis"
+  description: "Per-attribute challenge breakdown for classical trackers"
+  seed: 42
+
+# Dataset configuration
+dataset:
+  type: synthetic          # "synthetic" or "otb"
+  # Synthetic options
+  num_sequences: 30        # sequences to generate
+  num_frames: 200          # frames per sequence
+  frame_size: [320, 240]   # [width, height] in pixels
+  motion: linear           # linear | circular | random
+  seed: 42
+
+  # OTB options (uncomment and set dataset.type: otb)
+  # root: /data/OTB100
+  # name: OTB100
+
+# Trackers to compare
+trackers:
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+      sigma: 2.0
+  - name: KCF
+    params:
+      learning_rate: 0.075
+  - name: CSRT
+    params: {}
+
+# Attribute detection thresholds
+# (auto_annotate_from_gt defaults — adjust to match your dataset's characteristics)
+attribute_thresholds:
+  fast_motion_px_per_frame: 20.0   # px/frame above which "fast_motion" is set
+  scale_ratio_threshold: 4.0       # max/min area ratio for "scale_variation"
+  aspect_ratio_std_threshold: 0.30 # std(w/h) threshold for "aspect_ratio_change"
+  low_res_area_threshold: 400      # min GT area (px²) for "low_resolution"
+  motion_blur_speed_px: 40.0       # speed + small target → "motion_blur"
+
+# Standard challenge attributes (defined in eovot.metrics.attributes)
+#
+# fast_motion          — target moves > 20 px/frame on average
+# scale_variation      — max/min area ratio > 4x
+# aspect_ratio_change  — std(w/h) > 0.30
+# deformation          — aspect_ratio_change + large diagonal variation
+# out_of_view          — target centre exits frame boundaries
+# low_resolution       — GT area < 400 px²
+# motion_blur          — high speed + small target (proxy)
+# illumination_change  — requires pixel data (not auto-detected from GT)
+# occlusion            — requires annotation or pixel data
+# background_clutter   — requires pixel data
