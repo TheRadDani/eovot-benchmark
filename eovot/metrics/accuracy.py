@@ -79,12 +79,19 @@ class AccuracyMetrics:
     precision_auc: float
     """Normalised AUC of the Precision Curve (distance thresholds 0 → 50 px)."""
 
+    normalized_precision_auc: float = 0.0
+    """AUC of the Normalized Precision Curve (distance / sqrt(GT area), thresholds
+    0 → 0.5).  Scale-invariant: sequences with small and large targets are
+    weighted equally.  Used by GOT-10k and TrackingNet as the primary precision
+    scalar.  ``0.0`` when GT areas are unavailable."""
+
     def __str__(self) -> str:
         return (
             f"AccuracyMetrics("
             f"mIoU={self.mean_iou:.4f}, "
             f"success_AUC={self.success_auc:.4f}, "
-            f"precision_AUC={self.precision_auc:.4f})"
+            f"precision_AUC={self.precision_auc:.4f}, "
+            f"norm_precision_AUC={self.normalized_precision_auc:.4f})"
         )
 
 
@@ -196,37 +203,90 @@ class MetricsEngine:
         rates = np.array([(dists < t).mean() for t in thresholds])
         return thresholds, rates
 
+    def normalized_precision_curve(
+        self,
+        preds: np.ndarray,
+        gts: np.ndarray,
+        thresholds: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Normalized precision curve — scale-invariant alternative to pixel precision.
+
+        Divides the centre-to-centre distance by ``sqrt(GT area)`` so that large
+        and small targets contribute equally.  Used as the primary precision scalar
+        in GOT-10k and TrackingNet, making it directly comparable across datasets
+        with varying target sizes (e.g. pedestrians vs vehicles).
+
+        Formula for each frame::
+
+            norm_dist_t = center_distance(pred_t, gt_t) / sqrt(gt_w * gt_h)
+
+        Args:
+            preds:      ``(N, 4)`` predicted boxes ``(x, y, w, h)``.
+            gts:        ``(N, 4)`` ground-truth boxes ``(x, y, w, h)``.
+            thresholds: Normalised distance thresholds (default: 0 … 0.5,
+                        51 points).  A threshold of ``0.5`` corresponds to
+                        half the square root of the GT area — comparable to
+                        the 20 px raw threshold on a 1600 px² target.
+
+        Returns:
+            ``(thresholds, precision_rates)`` — both shape ``(T,)``.
+        """
+        if thresholds is None:
+            thresholds = np.linspace(0.0, 0.5, 51)
+        n = min(len(preds), len(gts))
+        if n == 0:
+            return thresholds, np.zeros_like(thresholds)
+
+        p = np.asarray(preds[:n], dtype=np.float64)
+        g = np.asarray(gts[:n], dtype=np.float64)
+
+        pc = p[:, :2] + p[:, 2:] / 2.0
+        gc = g[:, :2] + g[:, 2:] / 2.0
+        dists = np.sqrt(np.sum((pc - gc) ** 2, axis=1))
+
+        gt_areas = g[:, 2] * g[:, 3]
+        gt_sqrt_areas = np.sqrt(np.maximum(gt_areas, 1.0))
+        norm_dists = dists / gt_sqrt_areas
+
+        rates = np.array([(norm_dists < t).mean() for t in thresholds])
+        return thresholds, rates
+
     def compute_all(
         self,
         preds: np.ndarray,
         gts: np.ndarray,
     ) -> AccuracyMetrics:
-        """Compute mean IoU, success AUC, and precision AUC in one call.
+        """Compute mean IoU, success AUC, precision AUC, and normalised precision AUC.
 
         Args:
             preds: ``(N, 4)`` predicted boxes.
             gts:   ``(N, 4)`` ground-truth boxes.
 
         Returns:
-            :class:`AccuracyMetrics` with all scalar summaries populated.
+            :class:`AccuracyMetrics` with all scalar summaries populated,
+            including the scale-invariant :attr:`~AccuracyMetrics.normalized_precision_auc`.
         """
         ious = self.batch_iou(preds, gts)
 
-        # np.trapezoid was introduced in NumPy 2.0; np.trapz was removed in 2.0.
-        _trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz  # type: ignore[attr-defined]
-
-        thr_iou, sr = self.success_curve(ious)
         try:
             _trapz = np.trapezoid  # numpy ≥ 2.0
         except AttributeError:
-            _trapz = np.trapz  # numpy < 2.0
+            _trapz = np.trapz  # numpy < 2.0  # type: ignore[attr-defined]
+
+        thr_iou, sr = self.success_curve(ious)
         success_auc = float(_trapz(sr, thr_iou))
 
         thr_dist, pr = self.precision_curve(preds, gts)
         prec_auc = float(_trapz(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
 
+        thr_norm, npr = self.normalized_precision_curve(preds, gts)
+        norm_prec_auc = (
+            float(_trapz(npr, thr_norm) / thr_norm[-1]) if thr_norm[-1] > 0 else 0.0
+        )
+
         return AccuracyMetrics(
             mean_iou=float(ious.mean()),
             success_auc=success_auc,
             precision_auc=prec_auc,
+            normalized_precision_auc=norm_prec_auc,
         )

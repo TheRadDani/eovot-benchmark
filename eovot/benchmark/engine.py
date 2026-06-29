@@ -107,6 +107,17 @@ class BenchmarkResult:
                 if r.accuracy_metrics is not None]
         return float(np.mean(aucs)) if aucs else None
 
+    @property
+    def mean_normalized_precision_auc(self) -> Optional[float]:
+        """Mean normalised precision AUC across all sequences, or ``None`` if not computed.
+
+        Scale-invariant precision scalar (GOT-10k / TrackingNet convention):
+        distances are divided by ``sqrt(GT area)`` before thresholding.
+        """
+        aucs = [r.accuracy_metrics.normalized_precision_auc for r in self.sequence_results
+                if r.accuracy_metrics is not None]
+        return float(np.mean(aucs)) if aucs else None
+
     def summary(self) -> Dict:
         d: Dict = {
             "tracker": self.tracker_name,
@@ -125,6 +136,9 @@ class BenchmarkResult:
         pauc = self.mean_precision_auc
         if pauc is not None:
             d["precision_auc"] = round(pauc, 4)
+        npauc = self.mean_normalized_precision_auc
+        if npauc is not None:
+            d["normalized_precision_auc"] = round(npauc, 4)
         e_total = self.total_energy_j
         if e_total is not None:
             d["total_energy_j"] = round(e_total, 4)
@@ -147,11 +161,15 @@ class BenchmarkResult:
                 "mean_iou": round(r.mean_iou, 4),
                 "fps": round(r.profiling.fps, 2),
                 "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
+                "latency_p50_ms": round(r.profiling.latency_p50_ms, 3),
+                "latency_p95_ms": round(r.profiling.latency_p95_ms, 3),
+                "latency_p99_ms": round(r.profiling.latency_p99_ms, 3),
                 "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
             }
             if r.accuracy_metrics is not None:
                 entry["success_auc"] = round(r.accuracy_metrics.success_auc, 4)
                 entry["precision_auc"] = round(r.accuracy_metrics.precision_auc, 4)
+                entry["normalized_precision_auc"] = round(r.accuracy_metrics.normalized_precision_auc, 4)
             if r.energy is not None:
                 entry["energy_j"] = round(r.energy.total_energy_j, 6)
                 entry["energy_per_frame_mj"] = round(r.energy.energy_per_frame_mj, 4)
