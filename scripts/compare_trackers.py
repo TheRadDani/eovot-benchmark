@@ -48,17 +48,15 @@ from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
 from eovot.datasets.lasot import LaSOTDataset
 from eovot.reporting.reporter import BenchmarkReporter
-from eovot.trackers.kcf import KCFTracker
-from eovot.trackers.mosse import MOSSETracker
+from eovot.trackers.registry import TRACKER_REGISTRY
 
 # ---------------------------------------------------------------------------
 # Registries — add new trackers / datasets here without touching the CLI code
 # ---------------------------------------------------------------------------
-
-TRACKER_REGISTRY = {
-    "MOSSE": MOSSETracker,
-    "KCF": KCFTracker,
-}
+#
+# TRACKER_REGISTRY lives in eovot/trackers/registry.py and is shared with
+# run_benchmark.py and ExperimentRunner — add a tracker there once and it
+# becomes available everywhere.
 
 DATASET_REGISTRY = {
     "OTBDataset": OTBDataset,

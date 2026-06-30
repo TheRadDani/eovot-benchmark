@@ -269,24 +269,13 @@ class ExperimentRunner:
 
     @staticmethod
     def _build_tracker(cfg: Dict):
-        """Instantiate a tracker from a config dict."""
-        from ..trackers.csrt import CSRTTracker
-        from ..trackers.kcf import KCFTracker
-        from ..trackers.median_flow import MedianFlowTracker
-        from ..trackers.mil import MILTracker
-        from ..trackers.mosse import MOSSETracker
+        """Instantiate a tracker from a config dict.
 
-        registry = {
-            "MOSSE": MOSSETracker,
-            "KCF": KCFTracker,
-            "CSRT": CSRTTracker,
-            "MIL": MILTracker,
-            "MedianFlow": MedianFlowTracker,
-        }
-        name = cfg["name"]
-        if name not in registry:
-            raise ValueError(
-                f"Unknown tracker '{name}'. Available: {list(registry)}"
-            )
+        Delegates to the single shared registry in
+        :mod:`eovot.trackers.registry` so every tracker registered there
+        (including new ones) is automatically available here too.
+        """
+        from ..trackers.registry import build_tracker
+
         params = cfg.get("params", {}) or {}
-        return registry[name](**params)
+        return build_tracker(cfg["name"], **params)
