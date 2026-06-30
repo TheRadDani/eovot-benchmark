@@ -34,23 +34,13 @@ from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
 from eovot.datasets.lasot import LaSOTDataset
-from eovot.trackers.kcf import KCFTracker
-from eovot.trackers.mosse import MOSSETracker
-from eovot.trackers.kcf import KCFTracker
-from eovot.trackers.csrt import CSRTTracker
-from eovot.trackers.median_flow import MedianFlowTracker
+from eovot.trackers.registry import TRACKER_REGISTRY
 
 
 # ------------------------------------------------------------------ #
-# Tracker registry — extend as new trackers are added                 #
+# Tracker registry — shared with eovot.experiment.runner; see          #
+# eovot/trackers/registry.py to add a new tracker in one place.        #
 # ------------------------------------------------------------------ #
-
-TRACKER_REGISTRY: Dict[str, Any] = {
-    "MOSSE": MOSSETracker,
-    "KCF": KCFTracker,
-    "CSRT": CSRTTracker,
-    "MedianFlow": MedianFlowTracker,
-}
 
 
 # ------------------------------------------------------------------ #
