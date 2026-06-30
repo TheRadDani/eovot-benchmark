@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Any, Dict, Type
 
 from .base import BaseTracker
+from .camshift import CamShiftTracker
 from .csrt import CSRTTracker
 from .kcf import KCFTracker
 from .median_flow import MedianFlowTracker
@@ -37,6 +38,7 @@ TRACKER_REGISTRY: Dict[str, Type[BaseTracker]] = {
     "CSRT": CSRTTracker,
     "MIL": MILTracker,
     "MedianFlow": MedianFlowTracker,
+    "CamShift": CamShiftTracker,
 }
 
 # DaSiamRPN / NanoTracker need pre-trained ONNX files the user supplies
