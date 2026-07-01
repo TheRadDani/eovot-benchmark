@@ -13,7 +13,8 @@ Design notes
   edge-deployment baseline.
 * Uses a cosine window to reduce boundary effects in the FFT.
 * Learns the filter online with exponential moving average (EMA) update.
-* Gracefully handles partial out-of-bounds patches via ``cv2.resize``.
+* Returns the last known-good bbox when PSR drops below ``psr_threshold``
+  instead of updating to a low-confidence prediction.
 """
 
 from __future__ import annotations
@@ -37,8 +38,10 @@ class MOSSETracker(BaseTracker):
                        used during initialisation (pixels).  Smaller values
                        produce a sharper, more localised peak.
         psr_threshold: Peak-to-Sidelobe Ratio threshold below which the
-                       tracker is considered to have lost the target.  Set
-                       to ``None`` to disable failure detection.
+                       tracker is considered to have lost the target and
+                       the last known-good bbox is returned unchanged.
+                       Set to ``None`` (default) to disable PSR gating.
+                       Typical values: 7 (loose) – 20 (strict).
 
     Example::
 
@@ -108,6 +111,11 @@ class MOSSETracker(BaseTracker):
     def update(self, frame: np.ndarray) -> BBox:
         """Localise the target in the next frame and update the filter.
 
+        The predicted position is clamped so the bounding box always overlaps
+        the frame by at least 1 pixel.  When ``psr_threshold`` is set and the
+        Peak-to-Sidelobe Ratio of the correlation response is below that value,
+        the last known-good bbox is returned without updating the filter.
+
         Args:
             frame: BGR or grayscale image.
 
@@ -119,6 +127,7 @@ class MOSSETracker(BaseTracker):
 
         x, y, w, h = self._bbox
         gray = self._to_gray(frame)
+        ih, iw = gray.shape
 
         patch = self._extract_patch(gray, x, y, w, h)
         Fi = np.fft.fft2(self._preprocess(patch))
@@ -129,11 +138,25 @@ class MOSSETracker(BaseTracker):
         # Locate the peak
         ky, kx = np.unravel_index(response.argmax(), response.shape)
         # Shift: peak at (0,0) means no displacement
-        dy = ky if ky < h // 2 else ky - h
-        dx = kx if kx < w // 2 else kx - w
+        dy = int(ky) if ky < h // 2 else int(ky) - h
+        dx = int(kx) if kx < w // 2 else int(kx) - w
 
         x_new = x + dx
         y_new = y + dy
+
+        # Clamp so the box always overlaps the frame by at least 1 pixel.
+        # This guarantees _extract_patch never receives a completely OOB box
+        # and avoids the empty-slice cv2.resize assertion (issue #171).
+        x_new = int(max(1 - w, min(iw - 1, x_new)))
+        y_new = int(max(1 - h, min(ih - 1, y_new)))
+
+        # PSR gate: if confidence is too low, hold last known-good position.
+        if self.psr_threshold is not None:
+            psr = self._compute_psr(response, int(ky), int(kx))
+            if psr < self.psr_threshold:
+                return (float(self._bbox[0]), float(self._bbox[1]),
+                        float(w), float(h))
+
         self._bbox = [x_new, y_new, w, h]
 
         # Online filter update with EMA
@@ -180,8 +203,10 @@ class MOSSETracker(BaseTracker):
     ) -> np.ndarray:
         """Extract a ``(h, w)`` patch from *gray*, resizing if needed.
 
-        Clips coordinates to image boundaries so the patch is always
-        well-defined, even when the target is partially out of frame.
+        Clips coordinates to image boundaries.  When the clipped region is
+        empty (box entirely outside the frame), returns a zero-filled patch
+        rather than passing an empty array to ``cv2.resize`` (which would
+        trigger an OpenCV assertion error).
         """
         ih, iw = gray.shape
         x1 = max(0, x)
@@ -189,6 +214,49 @@ class MOSSETracker(BaseTracker):
         x2 = min(iw, x + w)
         y2 = min(ih, y + h)
         patch = gray[y1:y2, x1:x2]
+        if patch.size == 0:
+            # Box is entirely outside the frame; return a neutral patch so
+            # the FFT pipeline keeps running with low-confidence response.
+            return np.zeros((h, w), dtype=gray.dtype)
         if patch.shape != (h, w):
             patch = cv2.resize(patch, (w, h), interpolation=cv2.INTER_LINEAR)
         return patch
+
+    def _compute_psr(
+        self, response: np.ndarray, peak_y: int, peak_x: int
+    ) -> float:
+        """Compute the Peak-to-Sidelobe Ratio of the correlation response map.
+
+        PSR = (peak − sidelobe_mean) / sidelobe_std
+
+        The sidelobe region is everything outside an 11×11 window centred on
+        the peak (standard definition from Bolme et al. 2010).
+
+        Typical interpretations:
+          PSR > 20  — strong, reliable lock
+          PSR 7–20  — uncertain; target may be partially occluded
+          PSR < 7   — likely tracking failure
+
+        Args:
+            response: 2-D correlation response array.
+            peak_y:   Row index of the response peak.
+            peak_x:   Column index of the response peak.
+
+        Returns:
+            PSR scalar ≥ 0.  Returns ``0.0`` when the sidelobe has zero std.
+        """
+        rh, rw = response.shape
+        r = 5  # half-size of exclusion window (2r+1 = 11)
+        y1 = max(0, peak_y - r)
+        y2 = min(rh, peak_y + r + 1)
+        x1 = max(0, peak_x - r)
+        x2 = min(rw, peak_x + r + 1)
+        mask = np.ones((rh, rw), dtype=bool)
+        mask[y1:y2, x1:x2] = False
+        sidelobe = response[mask]
+        if sidelobe.size == 0:
+            return 0.0
+        std_sl = float(sidelobe.std())
+        if std_sl < 1e-10:
+            return 0.0
+        return float((float(response[peak_y, peak_x]) - float(sidelobe.mean())) / std_sl)
