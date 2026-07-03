@@ -15,6 +15,7 @@ from .statistical import (
     PairwiseSummary,
     StatisticalTestEngine,
 )
+from .deployability import DeployabilityScoreEngine, DeployabilityEntry
 
 __all__ = [
     "iou",
@@ -31,4 +32,6 @@ __all__ = [
     "WilcoxonResult",
     "PairwiseSummary",
     "StatisticalTestEngine",
+    "DeployabilityScoreEngine",
+    "DeployabilityEntry",
 ]
