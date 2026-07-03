@@ -233,12 +233,14 @@ class ExperimentRunner:
         from ..datasets.got10k import GOT10kDataset
         from ..datasets.lasot import LaSOTDataset
         from ..datasets.synthetic import SyntheticDataset
+        from ..datasets.challenge import ChallengeDataset
 
         loaders = {
             "OTBDataset": OTBDataset,
             "GOT10kDataset": GOT10kDataset,
             "LaSOTDataset": LaSOTDataset,
             "SyntheticDataset": SyntheticDataset,
+            "ChallengeDataset": ChallengeDataset,
         }
         loader_name = cfg.get("loader", "OTBDataset")
         if loader_name not in loaders:
@@ -258,6 +260,19 @@ class ExperimentRunner:
                 bbox_size=tuple(bbox_size),
                 motion=cfg.get("motion", "linear"),
                 seed=cfg.get("seed", 42),
+            )
+
+        if loader_name == "ChallengeDataset":
+            frame_size = cfg.get("frame_size", [320, 240])
+            bbox_size = cfg.get("bbox_size", [40, 40])
+            return cls(
+                challenge=cfg.get("challenge", "occlusion"),
+                num_sequences=cfg.get("num_sequences", 10),
+                num_frames=cfg.get("num_frames", 150),
+                frame_size=tuple(frame_size),
+                bbox_size=tuple(bbox_size),
+                seed=cfg.get("seed", 42),
+                n_distractors=cfg.get("n_distractors", 3),
             )
 
         root = cfg["root"]
