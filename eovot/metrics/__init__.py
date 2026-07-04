@@ -1,4 +1,4 @@
-"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, and statistical testing."""
+"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, and cross-dataset evaluation."""
 
 from .accuracy import (
     iou,
@@ -14,6 +14,11 @@ from .statistical import (
     WilcoxonResult,
     PairwiseSummary,
     StatisticalTestEngine,
+)
+from .cross_dataset import (
+    DatasetEntry,
+    AggregateEntry,
+    CrossDatasetEvaluator,
 )
 
 __all__ = [
@@ -31,4 +36,7 @@ __all__ = [
     "WilcoxonResult",
     "PairwiseSummary",
     "StatisticalTestEngine",
+    "DatasetEntry",
+    "AggregateEntry",
+    "CrossDatasetEvaluator",
 ]

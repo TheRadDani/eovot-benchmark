@@ -32,6 +32,13 @@ Usage::
         --trackers MOSSE KCF \\
         --dataset-root /data/OTB100 \\
         --tdp-watts 15.0
+
+    # No external data needed — use the built-in synthetic dataset
+    python scripts/compare_trackers.py \\
+        --trackers MOSSE KCF CamShift \\
+        --dataset-loader SyntheticDataset \\
+        --dataset-root . \\
+        --max-sequences 5
 """
 
 from __future__ import annotations
@@ -47,6 +54,7 @@ from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
 from eovot.datasets.lasot import LaSOTDataset
+from eovot.datasets.synthetic import SyntheticDataset
 from eovot.reporting.reporter import BenchmarkReporter
 from eovot.trackers.registry import TRACKER_REGISTRY
 
@@ -62,6 +70,7 @@ DATASET_REGISTRY = {
     "OTBDataset": OTBDataset,
     "GOT10kDataset": GOT10kDataset,
     "LaSOTDataset": LaSOTDataset,
+    "SyntheticDataset": SyntheticDataset,
 }
 
 
@@ -72,6 +81,12 @@ def _build_dataset(loader_name: str, root: str, split: str, max_sequences):
         return cls(root=root, split=split, max_sequences=max_sequences)
     if loader_name == "LaSOTDataset":
         return cls(root=root, split=split, max_sequences=max_sequences)
+    if loader_name == "SyntheticDataset":
+        # SyntheticDataset needs no root path; max_sequences maps to num_sequences.
+        kwargs = {}
+        if max_sequences is not None:
+            kwargs["num_sequences"] = max_sequences
+        return cls(**kwargs)
     return cls(root=root)
 
 
@@ -148,16 +163,6 @@ def main() -> None:
         dataset = _build_dataset(
             args.dataset_loader, args.dataset_root, args.split, args.max_sequences
         )
-
-        dataset_cls = DATASET_REGISTRY[args.dataset_loader]
-        if args.dataset_loader == "GOT10kDataset":
-            dataset = dataset_cls(
-                root=args.dataset_root,
-                split=args.split,
-                max_sequences=args.max_sequences,
-            )
-        else:
-            dataset = dataset_cls(root=args.dataset_root)
 
         result = engine.run(
             tracker=tracker,
