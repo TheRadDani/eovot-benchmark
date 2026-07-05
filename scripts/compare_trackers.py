@@ -151,16 +151,6 @@ def main() -> None:
             args.dataset_loader, args.dataset_root, args.split, args.max_sequences
         )
 
-        dataset_cls = DATASET_REGISTRY[args.dataset_loader]
-        if args.dataset_loader == "GOT10kDataset":
-            dataset = dataset_cls(
-                root=args.dataset_root,
-                split=args.split,
-                max_sequences=args.max_sequences,
-            )
-        else:
-            dataset = dataset_cls(root=args.dataset_root)
-
         result = engine.run(
             tracker=tracker,
             dataset=dataset,
