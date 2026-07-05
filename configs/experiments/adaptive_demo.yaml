@@ -1,0 +1,38 @@
+# Adaptive tracker demo — illustrates FPS-budget-aware tracker switching.
+#
+# The AdaptiveTracker wraps MOSSE (fast) and KCF (accurate) and switches
+# between them based on a 25 FPS rolling budget with 15% hysteresis.
+# Run with:
+#   python scripts/run_experiment.py --config configs/experiments/adaptive_demo.yaml
+
+experiment:
+  name: adaptive_demo
+  description: >
+    Evaluate AdaptiveTracker (MOSSE/KCF switching at 25 FPS budget) against
+    each sub-tracker in isolation on a synthetic sequence.  Demonstrates
+    EOVOT's adaptive inference capability for edge deployment.
+
+dataset:
+  loader: SyntheticDataset
+  params:
+    num_sequences: 5
+    sequence_length: 60
+    image_size: [128, 128]
+    motion: linear
+    seed: 42
+
+trackers:
+  - name: MOSSE
+    params: {}
+  - name: KCF
+    params: {}
+
+benchmark:
+  max_sequences: null
+  verbose: true
+
+reporting:
+  output_dir: results/adaptive_demo
+  save_json: true
+  save_csv: true
+  save_markdown: true
