@@ -7,6 +7,8 @@ Provides publication-quality plots for tracker evaluation:
   precision curves
 - :func:`~eovot.visualization.plots.plot_tracker_comparison` — bar-chart
   comparison of multiple trackers across key metrics
+- :func:`~eovot.visualization.plots.plot_edge_scatter` — IoU vs. FPS bubble
+  scatter coloured by Edge Efficiency Score; the canonical EOVOT summary plot
 
 All functions accept the dict format produced by
 :meth:`~eovot.benchmark.engine.BenchmarkEngine.run` and require
@@ -14,10 +16,16 @@ All functions accept the dict format produced by
 lightweight; install it with ``pip install matplotlib``).
 """
 
-from .plots import plot_success_curves, plot_precision_curves, plot_tracker_comparison
+from .plots import (
+    plot_success_curves,
+    plot_precision_curves,
+    plot_tracker_comparison,
+    plot_edge_scatter,
+)
 
 __all__ = [
     "plot_success_curves",
     "plot_precision_curves",
     "plot_tracker_comparison",
+    "plot_edge_scatter",
 ]

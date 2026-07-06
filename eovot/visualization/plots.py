@@ -18,7 +18,11 @@ Requires ``matplotlib``.  Install with::
 Example::
 
     import json
-    from eovot.visualization.plots import plot_success_curves, plot_tracker_comparison
+    from eovot.visualization.plots import (
+        plot_success_curves,
+        plot_tracker_comparison,
+        plot_edge_scatter,
+    )
 
     with open("results/MOSSE-OTB100.json") as f:
         mosse = json.load(f)
@@ -26,7 +30,7 @@ Example::
         kcf = json.load(f)
 
     plot_success_curves([mosse, kcf], output_path="success_curves.png")
-    plot_tracker_comparison([mosse, kcf], output_path="comparison.png")
+    plot_edge_scatter([mosse, kcf], output_path="edge_scatter.png")
 """
 
 from __future__ import annotations
@@ -277,5 +281,167 @@ def plot_tracker_comparison(
         fig.savefig(output_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
         print(f"[plot] Tracker comparison saved → {output_path}")
+    else:
+        plt.show()
+
+
+def plot_edge_scatter(
+    results: List[Dict[str, Any]],
+    output_path: Optional[str] = None,
+    title: str = "Edge Deployment Trade-off: Accuracy vs. Throughput",
+    memory_budget_mb: float = 512.0,
+    show_pareto: bool = True,
+) -> None:
+    """Bubble scatter plot of IoU vs. FPS coloured by Edge Efficiency Score (EES).
+
+    Visualises EOVOT's core edge-deployment thesis: *both* accuracy and
+    throughput must be high, and memory consumption must remain within budget.
+
+    - **X axis** — mean IoU (accuracy)
+    - **Y axis** — mean FPS (throughput, log scale)
+    - **Bubble area** — peak memory in MB (larger = more memory)
+    - **Colour** — Edge Efficiency Score (EES = mIoU × log1p(FPS) / memory_factor)
+    - **Orange cross** — Pareto-optimal trackers
+
+    Args:
+        results: List of result dicts from
+            :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`, one per
+            tracker / dataset combination.
+        output_path: File path to save the figure (PNG/PDF/SVG).
+            Shows interactively when ``None``.
+        title: Figure title string.
+        memory_budget_mb: Reference memory budget in MB used to compute EES
+            and scale the legend annotation.  Default: ``512.0``.
+        show_pareto: When ``True``, Pareto-optimal trackers are highlighted
+            with an orange ring.  Default: ``True``.
+
+    Example::
+
+        from eovot.visualization.plots import plot_edge_scatter
+
+        plot_edge_scatter(
+            [mosse_result, kcf_result, csrt_result],
+            output_path="edge_scatter.png",
+        )
+    """
+    import math
+
+    plt = _get_matplotlib()
+    import matplotlib.pyplot as _plt
+    import matplotlib.cm as cm
+
+    if not results:
+        return
+
+    labels, ious, fpss, mems, eess = [], [], [], [], []
+    for r in results:
+        s = r.get("summary", {})
+        tracker = s.get("tracker") or s.get("tracker_name", "?")
+        miou  = float(s.get("mean_iou", 0.0))
+        fps   = float(s.get("mean_fps", 1.0))
+        mem   = float(s.get("peak_memory_mb", 1.0))
+        ees   = miou * math.log1p(fps) / (1.0 + mem / memory_budget_mb)
+        labels.append(tracker)
+        ious.append(miou)
+        fpss.append(max(fps, 1e-3))
+        mems.append(max(mem, 1.0))
+        eess.append(ees)
+
+    ious_arr = np.array(ious)
+    fpss_arr = np.array(fpss)
+    mems_arr = np.array(mems)
+    eess_arr = np.array(eess)
+
+    # Bubble area scaled so the range [min_mem, max_mem] maps to [100, 2000] pt²
+    mem_min, mem_max = mems_arr.min(), mems_arr.max()
+    mem_range = max(mem_max - mem_min, 1.0)
+    bubble_sizes = 100 + 1900 * (mems_arr - mem_min) / mem_range
+
+    # Identify Pareto front in (mIoU, EES) space for optional highlighting
+    pareto_flags = [True] * len(results)
+    if show_pareto:
+        for i in range(len(results)):
+            for j in range(len(results)):
+                if i == j:
+                    continue
+                if (
+                    ious_arr[j] >= ious_arr[i]
+                    and eess_arr[j] >= eess_arr[i]
+                    and (ious_arr[j] > ious_arr[i] or eess_arr[j] > eess_arr[i])
+                ):
+                    pareto_flags[i] = False
+                    break
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+
+    # Colour map over EES values
+    norm = _plt.Normalize(vmin=eess_arr.min(), vmax=max(eess_arr.max(), 1e-6))
+    cmap = cm.viridis
+
+    sc = ax.scatter(
+        ious_arr,
+        fpss_arr,
+        s=bubble_sizes,
+        c=eess_arr,
+        cmap=cmap,
+        norm=norm,
+        alpha=0.80,
+        edgecolors="grey",
+        linewidths=0.6,
+        zorder=3,
+    )
+
+    # Pareto-front ring
+    if show_pareto:
+        pareto_x = ious_arr[pareto_flags]
+        pareto_y = fpss_arr[pareto_flags]
+        pareto_s = bubble_sizes[pareto_flags]
+        if len(pareto_x):
+            ax.scatter(
+                pareto_x,
+                pareto_y,
+                s=pareto_s * 1.45,
+                facecolors="none",
+                edgecolors="darkorange",
+                linewidths=2.2,
+                zorder=4,
+                label="Pareto front",
+            )
+
+    # Tracker labels
+    for i, lbl in enumerate(labels):
+        ax.annotate(
+            lbl,
+            (ious_arr[i], fpss_arr[i]),
+            xytext=(6, 4),
+            textcoords="offset points",
+            fontsize=9,
+            zorder=5,
+        )
+
+    cbar = fig.colorbar(sc, ax=ax, pad=0.02)
+    cbar.set_label("Edge Efficiency Score (EES)", fontsize=10)
+
+    ax.set_xscale("linear")
+    ax.set_yscale("log")
+    ax.set_xlabel("Mean IoU (accuracy)", fontsize=12)
+    ax.set_ylabel("Mean FPS (throughput, log scale)", fontsize=12)
+    ax.set_title(title, fontsize=13)
+    ax.grid(True, which="both", alpha=0.25)
+
+    # Legend: bubble size → memory
+    for mem_val in [mem_min, (mem_min + mem_max) / 2, mem_max]:
+        s_val = 100 + 1900 * (mem_val - mem_min) / mem_range
+        ax.scatter([], [], s=s_val, c="grey", alpha=0.5,
+                   label=f"{mem_val:.0f} MB")
+    ax.legend(title="Peak Memory", fontsize=9, title_fontsize=9,
+              loc="lower right", framealpha=0.8)
+
+    fig.tight_layout()
+
+    if output_path:
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"[plot] Edge scatter saved → {output_path}")
     else:
         plt.show()
