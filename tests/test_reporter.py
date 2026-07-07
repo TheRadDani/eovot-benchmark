@@ -13,12 +13,14 @@ from eovot.reporting.reporter import BenchmarkReporter
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_result_dict(tracker="MOSSE", dataset="OTB100", n_seqs=3):
+def _make_result_dict(tracker="MOSSE", dataset="OTB100", n_seqs=3, with_auc=False):
     """Build a minimal result dict in the format produced by BenchmarkResult.to_dict()."""
     sequences = [
         {
             "sequence_name": f"seq_{i}",
             "mean_iou": 0.5 + i * 0.05,
+            "success_auc": 0.48 + i * 0.04 if with_auc else None,
+            "precision_auc": 0.62 + i * 0.03 if with_auc else None,
             "fps": 200.0 + i * 10,
             "mean_latency_ms": 5.0 - i * 0.5,
             "peak_memory_mb": 50.0 + i,
@@ -28,12 +30,11 @@ def _make_result_dict(tracker="MOSSE", dataset="OTB100", n_seqs=3):
     return {
         "summary": {
             "tracker": tracker,
-            "tracker_name": tracker,   # reporter.to_markdown_row uses "tracker_name"
             "dataset": dataset,
-            "dataset_name": dataset,   # reporter.to_markdown_row uses "dataset_name"
             "num_sequences": n_seqs,
             "mean_iou": 0.55,
             "mean_fps": 210.0,
+            "mean_latency_ms": 4.5,
             "peak_memory_mb": 51.0,
         },
         "sequences": sequences,
@@ -93,6 +94,20 @@ class TestBenchmarkReporter:
         assert "sequence_name" in cols
         assert "mean_iou" in cols
         assert "fps" in cols
+        # Correct column name is precision_auc (not the old precision_score typo)
+        assert "precision_auc" in cols
+        assert "success_auc" in cols
+        assert "precision_score" not in cols
+
+    def test_save_csv_precision_auc_values_written(self):
+        """AUC values must be written when present in the result dict."""
+        result = _make_result_dict(with_auc=True)
+        path = self.reporter.save_csv(result, name="auc_run")
+        with open(path, newline="") as f:
+            rows = list(csv.DictReader(f))
+        # At least the first row should have a non-empty precision_auc
+        assert rows[0]["precision_auc"] != ""
+        assert rows[0]["success_auc"] != ""
 
     def test_save_all_returns_both_formats(self):
         result = _make_result_dict()

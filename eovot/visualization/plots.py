@@ -35,6 +35,15 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+# NumPy 2.0 renamed trapz → trapezoid; support both.
+_trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
+
+
+def _tracker_label(result: Dict[str, Any]) -> str:
+    """Extract tracker name from a result summary, handling both key variants."""
+    s = result.get("summary", {})
+    return s.get("tracker") or s.get("tracker_name", "unknown")
+
 
 def _get_matplotlib():
     """Import matplotlib.pyplot, raising a clear error if absent."""
@@ -95,12 +104,12 @@ def plot_success_curves(
     fig, ax = plt.subplots(figsize=(8, 5))
 
     for result in results:
-        tracker_name = result.get("summary", {}).get("tracker_name", "unknown")
+        tracker_name = _tracker_label(result)
         ious = _collect_ious(result)
         if len(ious) == 0:
             continue
         success_rates = np.array([(ious >= t).mean() for t in thresholds])
-        auc = float(np.trapz(success_rates, thresholds))
+        auc = float(_trapz(success_rates, thresholds))
         ax.plot(
             thresholds,
             success_rates,
@@ -156,7 +165,7 @@ def plot_precision_curves(
     plotted = 0
 
     for result in results:
-        tracker_name = result.get("summary", {}).get("tracker_name", "unknown")
+        tracker_name = _tracker_label(result)
         dists_list = []
         for seq in result.get("sequences", []):
             raw = seq.get("center_distances")
@@ -222,8 +231,7 @@ def plot_tracker_comparison(
     if metrics is None:
         metrics = ["mean_iou", "mean_fps", "peak_memory_mb"]
 
-    labels = [r.get("summary", {}).get("tracker_name", f"tracker_{i}")
-              for i, r in enumerate(results)]
+    labels = [_tracker_label(r) for r in results]
     values = {
         m: [r.get("summary", {}).get(m, 0.0) for r in results]
         for m in metrics

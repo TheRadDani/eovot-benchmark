@@ -63,7 +63,8 @@ def load_results(paths: List[str]) -> list:
         if "summary" not in data:
             data = {"summary": data, "sequences": []}
         results.append(data)
-        tracker = data.get("summary", {}).get("tracker_name", Path(p).stem)
+        s = data.get("summary", {})
+        tracker = s.get("tracker") or s.get("tracker_name") or Path(p).stem
         n_seq = len(data.get("sequences", []))
         print(f"  Loaded {tracker!r}: {n_seq} sequences from {p}")
     return results
@@ -129,7 +130,7 @@ def main() -> None:
         sys.exit(1)
 
     names = " vs ".join(
-        r.get("summary", {}).get("tracker_name", f"tracker_{i}")
+        (r.get("summary", {}).get("tracker") or r.get("summary", {}).get("tracker_name") or f"tracker_{i}")
         for i, r in enumerate(results)
     )
     auto_title = names

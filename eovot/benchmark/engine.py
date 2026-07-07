@@ -107,6 +107,11 @@ class BenchmarkResult:
                 if r.accuracy_metrics is not None]
         return float(np.mean(aucs)) if aucs else None
 
+    @property
+    def mean_latency_ms(self) -> float:
+        """Mean per-frame update latency across all sequences (milliseconds)."""
+        return float(np.mean([r.profiling.latency_mean_ms for r in self.sequence_results]))
+
     def summary(self) -> Dict:
         d: Dict = {
             "tracker": self.tracker_name,
@@ -114,6 +119,7 @@ class BenchmarkResult:
             "num_sequences": len(self.sequence_results),
             "mean_iou": round(self.mean_iou, 4),
             "mean_fps": round(self.mean_fps, 2),
+            "mean_latency_ms": round(self.mean_latency_ms, 3),
             "peak_memory_mb": round(self.peak_memory_mb, 2),
         }
         mcd = self.mean_center_distance

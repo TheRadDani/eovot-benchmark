@@ -137,8 +137,14 @@ class TestBenchmarkEngine:
     def test_summary_dict_keys(self):
         result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
         s = result.summary()
-        for key in ("tracker", "dataset", "num_sequences", "mean_iou", "mean_fps", "peak_memory_mb"):
+        for key in ("tracker", "dataset", "num_sequences", "mean_iou", "mean_fps",
+                    "mean_latency_ms", "peak_memory_mb"):
             assert key in s
+
+    def test_summary_mean_latency_ms_present(self):
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        assert result.mean_latency_ms >= 0.0
+        assert "mean_latency_ms" in result.summary()
 
     def test_to_dict_structure(self):
         result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
