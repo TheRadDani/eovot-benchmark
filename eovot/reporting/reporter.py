@@ -66,8 +66,8 @@ class BenchmarkReporter:
     def save_csv(self, result: Dict[str, Any], name: str) -> Path:
         """Write per-sequence metrics to a CSV file.
 
-        Columns: ``sequence_name``, ``mean_iou``, ``precision_score``,
-        ``fps``, ``mean_latency_ms``.
+        Columns: ``sequence_name``, ``mean_iou``, ``success_auc``,
+        ``precision_auc``, ``fps``, ``mean_latency_ms``.
 
         Args:
             result: Output dict from :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
@@ -81,7 +81,10 @@ class BenchmarkReporter:
         if not sequences:
             return path
 
-        fieldnames = ["sequence_name", "mean_iou", "precision_score", "fps", "mean_latency_ms"]
+        fieldnames = [
+            "sequence_name", "mean_iou", "success_auc", "precision_auc",
+            "fps", "mean_latency_ms",
+        ]
         with open(path, "w", newline="") as fh:
             writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
             writer.writeheader()
@@ -89,7 +92,8 @@ class BenchmarkReporter:
                 writer.writerow({
                     "sequence_name": seq.get("sequence_name", ""),
                     "mean_iou": f"{seq.get('mean_iou', 0.0):.4f}",
-                    "precision_score": f"{seq.get('precision_score', 0.0):.4f}",
+                    "success_auc": f"{seq.get('success_auc', '')}" if seq.get("success_auc") is not None else "",
+                    "precision_auc": f"{seq.get('precision_auc', '')}" if seq.get("precision_auc") is not None else "",
                     "fps": f"{seq.get('fps', 0.0):.2f}",
                     "mean_latency_ms": f"{seq.get('mean_latency_ms', 0.0):.3f}",
                 })
