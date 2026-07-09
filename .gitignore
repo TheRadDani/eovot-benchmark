@@ -50,3 +50,6 @@ coverage.xml
 *.egg-info/
 dist/
 build/
+
+# Benchmark output (generated at runtime)
+results/
