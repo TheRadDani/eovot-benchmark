@@ -66,8 +66,9 @@ class BenchmarkReporter:
     def save_csv(self, result: Dict[str, Any], name: str) -> Path:
         """Write per-sequence metrics to a CSV file.
 
-        Columns: ``sequence_name``, ``mean_iou``, ``precision_score``,
-        ``fps``, ``mean_latency_ms``.
+        Columns: ``sequence_name``, ``mean_iou``, ``success_auc``,
+        ``precision_auc``, ``norm_precision_auc``, ``sr_50``, ``sr_75``,
+        ``fps``, ``mean_latency_ms``, ``peak_memory_mb``.
 
         Args:
             result: Output dict from :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
@@ -81,7 +82,11 @@ class BenchmarkReporter:
         if not sequences:
             return path
 
-        fieldnames = ["sequence_name", "mean_iou", "precision_score", "fps", "mean_latency_ms"]
+        fieldnames = [
+            "sequence_name", "mean_iou", "success_auc", "precision_auc",
+            "norm_precision_auc", "sr_50", "sr_75",
+            "fps", "mean_latency_ms", "peak_memory_mb",
+        ]
         with open(path, "w", newline="") as fh:
             writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
             writer.writeheader()
@@ -89,9 +94,14 @@ class BenchmarkReporter:
                 writer.writerow({
                     "sequence_name": seq.get("sequence_name", ""),
                     "mean_iou": f"{seq.get('mean_iou', 0.0):.4f}",
-                    "precision_score": f"{seq.get('precision_score', 0.0):.4f}",
+                    "success_auc": f"{seq.get('success_auc', 0.0):.4f}",
+                    "precision_auc": f"{seq.get('precision_auc', 0.0):.4f}",
+                    "norm_precision_auc": f"{seq.get('norm_precision_auc', 0.0):.4f}",
+                    "sr_50": f"{seq.get('sr_50', 0.0):.4f}",
+                    "sr_75": f"{seq.get('sr_75', 0.0):.4f}",
                     "fps": f"{seq.get('fps', 0.0):.2f}",
                     "mean_latency_ms": f"{seq.get('mean_latency_ms', 0.0):.3f}",
+                    "peak_memory_mb": f"{seq.get('peak_memory_mb', 0.0):.2f}",
                 })
         return path
 
@@ -134,7 +144,8 @@ class BenchmarkReporter:
     def to_markdown_row(result: Dict[str, Any]) -> str:
         """Format a single benchmark result as one Markdown table row.
 
-        Columns: Tracker | Dataset | mIoU | Success AUC | Precision AUC | FPS | Latency (ms) | Mem (MB)
+        Columns: Tracker | Dataset | AO (mIoU) | Success AUC | Prec AUC |
+                 N-PREC AUC | SR@0.5 | SR@0.75 | FPS | Latency (ms) | Mem (MB)
 
         Args:
             result: Output dict from :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
@@ -148,15 +159,19 @@ class BenchmarkReporter:
         tracker = s.get("tracker") or s.get("tracker_name", "?")
         dataset = s.get("dataset") or s.get("dataset_name", "?")
         mean_iou = float(s.get("mean_iou", 0.0))
-        # Fall back gracefully when success/precision AUC are absent (pre-existing result files).
+        # Fall back gracefully when AUC fields are absent (pre-existing result files).
         success_auc = float(s.get("success_auc", mean_iou))
         precision_auc = float(s.get("precision_auc", 0.0))
+        norm_prec_auc = float(s.get("norm_precision_auc", 0.0))
+        sr_50 = float(s.get("sr_50", 0.0))
+        sr_75 = float(s.get("sr_75", 0.0))
         fps = float(s.get("mean_fps", 0.0))
         lat = float(s.get("mean_latency_ms", 0.0))
         mem = float(s.get("peak_memory_mb", 0.0))
         return (
             f"| {tracker} | {dataset} | {mean_iou:.4f} "
             f"| {success_auc:.4f} | {precision_auc:.4f} "
+            f"| {norm_prec_auc:.4f} | {sr_50:.4f} | {sr_75:.4f} "
             f"| {fps:.1f} | {lat:.2f} | {mem:.1f} |"
         )
 
@@ -164,8 +179,7 @@ class BenchmarkReporter:
     def comparison_table(results: List[Dict[str, Any]]) -> str:
         """Build a Markdown comparison table from multiple benchmark results.
 
-        Includes the standard VOT scalars (mIoU, success AUC, precision AUC)
-        alongside hardware metrics (FPS, latency, memory).
+        Includes OTB, LaSOT, and GOT-10k protocol scalars alongside hardware metrics.
 
         Args:
             results: List of outputs from
@@ -176,8 +190,8 @@ class BenchmarkReporter:
             A multi-line Markdown string ready to paste into a README or paper.
         """
         header = (
-            "| Tracker | Dataset | mIoU | Success AUC | Precision AUC | FPS | Latency (ms) | Mem (MB) |\n"
-            "|---------|---------|-----:|------------:|--------------:|----:|-------------:|---------:|\n"
+            "| Tracker | Dataset | AO (mIoU) | Success AUC | Prec AUC | N-PREC AUC | SR@0.5 | SR@0.75 | FPS | Latency (ms) | Mem (MB) |\n"
+            "|---------|---------|----------:|------------:|---------:|-----------:|-------:|--------:|----:|-------------:|---------:|\n"
         )
         rows = "\n".join(BenchmarkReporter.to_markdown_row(r) for r in results)
         return header + rows
