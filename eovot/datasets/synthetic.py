@@ -52,6 +52,7 @@ class _InMemorySequence(Sequence):
         name: str,
         frames: List[np.ndarray],
         ground_truth: np.ndarray,
+        attributes: Optional[set] = None,
     ) -> None:
         self._frames = frames
         # Pass synthetic paths; __iter__ is overridden so they are never opened.
@@ -59,6 +60,7 @@ class _InMemorySequence(Sequence):
             name=name,
             frame_paths=["<memory>"] * len(frames),
             ground_truth=ground_truth,
+            attributes=attributes,
         )
 
     def __len__(self) -> int:
@@ -186,7 +188,37 @@ class SyntheticDataset(BaseDataset):
             name=f"synth_{self.motion}_{idx:03d}",
             frames=frames,
             ground_truth=np.array(gt_boxes, dtype=np.float64),
+            attributes=self._infer_attributes(rng),
         )
+
+    def _infer_attributes(self, rng: np.random.Generator) -> set:
+        """Automatically tag a sequence with challenge attributes based on motion.
+
+        Returns a set of :class:`~eovot.analysis.attributes.SequenceAttribute`
+        members reflecting the challenges intrinsic to each motion pattern.
+        Uses a lazy import to avoid a circular dependency.
+        """
+        try:
+            from ..analysis.attributes import SequenceAttribute as SA
+        except ImportError:
+            return set()
+
+        attrs: set = set()
+        if self.motion == "linear":
+            # Constant-velocity drift with wall-bounce — challenges fast-motion
+            # handling but target never deforms or rotates.
+            attrs.add(SA.FAST_MOTION)
+            attrs.add(SA.OUT_OF_VIEW)      # bouncing may bring target near edges
+        elif self.motion == "circular":
+            # Circular orbit — challenges rotation and aspect-ratio estimation.
+            attrs.add(SA.ROTATION)
+            attrs.add(SA.FAST_MOTION)
+        else:  # random
+            # Random walk — scale/direction unpredictable; models background clutter
+            # scenarios where target moves erratically.
+            attrs.add(SA.BACKGROUND_CLUTTER)
+            attrs.add(SA.FAST_MOTION)
+        return attrs
 
     def _generate_positions(
         self,
