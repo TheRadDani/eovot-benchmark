@@ -1,4 +1,4 @@
-"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, and statistical testing."""
+"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, and attribute analysis."""
 
 from .accuracy import (
     iou,
@@ -14,6 +14,13 @@ from .statistical import (
     WilcoxonResult,
     PairwiseSummary,
     StatisticalTestEngine,
+)
+from .attribute_analysis import (
+    AttributeAnalyzer,
+    AttributeMetrics,
+    AttributeReport,
+    OTB_ATTRIBUTES,
+    assign_synthetic_attributes,
 )
 
 __all__ = [
@@ -31,4 +38,9 @@ __all__ = [
     "WilcoxonResult",
     "PairwiseSummary",
     "StatisticalTestEngine",
+    "AttributeAnalyzer",
+    "AttributeMetrics",
+    "AttributeReport",
+    "OTB_ATTRIBUTES",
+    "assign_synthetic_attributes",
 ]

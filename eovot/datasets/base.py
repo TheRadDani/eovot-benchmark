@@ -22,24 +22,44 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Optional, Set, Tuple, TYPE_CHECKING
 
 import cv2
 import numpy as np
+
+if TYPE_CHECKING:
+    from ..analysis.attributes import SequenceAttribute
 
 BBox = Tuple[float, float, float, float]
 _IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
 
 
 class Sequence:
-    """A single tracking sequence: ordered frames and per-frame ground truth."""
+    """A single tracking sequence: ordered frames and per-frame ground truth.
 
-    def __init__(self, name: str, frame_paths: List[str], ground_truth: np.ndarray) -> None:
+    The optional ``attributes`` field carries a set of difficulty challenge
+    tags (:class:`~eovot.analysis.attributes.SequenceAttribute`) describing
+    the visual challenges present in this sequence.  Dataset loaders that
+    provide attribute metadata (OTB, LaSOT, VOT) should populate this set;
+    :class:`~eovot.datasets.synthetic.SyntheticDataset` automatically tags
+    sequences based on their motion parameters.
+
+    Sequences without attribute metadata have ``attributes = None``.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        frame_paths: List[str],
+        ground_truth: np.ndarray,
+        attributes: Optional[Set] = None,
+    ) -> None:
         if ground_truth.ndim != 2 or ground_truth.shape[1] != 4:
             raise ValueError(f"ground_truth must be shape (N, 4), got {ground_truth.shape}")
         self.name = name
         self._frame_paths = frame_paths
         self.ground_truth = ground_truth
+        self.attributes: Optional[Set] = attributes
 
     def __len__(self) -> int:
         return len(self._frame_paths)
