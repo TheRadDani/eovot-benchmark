@@ -155,6 +155,11 @@ class BenchmarkResult:
             if r.energy is not None:
                 entry["energy_j"] = round(r.energy.total_energy_j, 6)
                 entry["energy_per_frame_mj"] = round(r.energy.energy_per_frame_mj, 4)
+            # Per-frame arrays enable full success/precision curve plots from JSON.
+            if r.ious is not None and len(r.ious) > 0:
+                entry["ious"] = [round(float(v), 6) for v in r.ious]
+            if r.center_distances is not None and len(r.center_distances) > 0:
+                entry["center_distances"] = [round(float(v), 3) for v in r.center_distances]
             sequences.append(entry)
         return {"summary": self.summary(), "sequences": sequences}
 
