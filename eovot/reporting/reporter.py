@@ -13,7 +13,7 @@ Typical usage::
     result = engine.run(tracker, dataset)
 
     reporter = BenchmarkReporter(output_dir="results/")
-    reporter.save_all(result, name="MOSSE-OTB100")
+    reporter.save_all(result.to_dict(), name="MOSSE-OTB100")
     reporter.print_summary(result)
 """
 
@@ -52,7 +52,7 @@ class BenchmarkReporter:
         """Serialise the full result dict to a JSON file.
 
         Args:
-            result: Output dict from :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
+            result: Output dict from :meth:`~eovot.benchmark.engine.BenchmarkResult.to_dict`.
             name: Base filename without extension.
 
         Returns:
@@ -66,11 +66,13 @@ class BenchmarkReporter:
     def save_csv(self, result: Dict[str, Any], name: str) -> Path:
         """Write per-sequence metrics to a CSV file.
 
-        Columns: ``sequence_name``, ``mean_iou``, ``precision_score``,
-        ``fps``, ``mean_latency_ms``.
+        Columns: ``sequence_name``, ``mean_iou``, ``success_auc``,
+        ``precision_auc``, ``fps``, ``mean_latency_ms``,
+        ``peak_memory_mb``, ``energy_per_frame_mj``.
 
         Args:
-            result: Output dict from :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
+            result: Output dict from
+                :meth:`~eovot.benchmark.engine.BenchmarkResult.to_dict`.
             name: Base filename without extension.
 
         Returns:
@@ -81,33 +83,52 @@ class BenchmarkReporter:
         if not sequences:
             return path
 
-        fieldnames = ["sequence_name", "mean_iou", "precision_score", "fps", "mean_latency_ms"]
+        # All columns produced by BenchmarkResult.to_dict(); energy is optional.
+        fieldnames = [
+            "sequence_name",
+            "mean_iou",
+            "success_auc",
+            "precision_auc",
+            "fps",
+            "mean_latency_ms",
+            "peak_memory_mb",
+            "energy_per_frame_mj",
+        ]
         with open(path, "w", newline="") as fh:
-            writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
+            writer = csv.DictWriter(
+                fh, fieldnames=fieldnames, extrasaction="ignore"
+            )
             writer.writeheader()
             for seq in sequences:
                 writer.writerow({
-                    "sequence_name": seq.get("sequence_name", ""),
-                    "mean_iou": f"{seq.get('mean_iou', 0.0):.4f}",
-                    "precision_score": f"{seq.get('precision_score', 0.0):.4f}",
-                    "fps": f"{seq.get('fps', 0.0):.2f}",
-                    "mean_latency_ms": f"{seq.get('mean_latency_ms', 0.0):.3f}",
+                    "sequence_name":     seq.get("sequence_name", ""),
+                    "mean_iou":          f"{seq.get('mean_iou', 0.0):.4f}",
+                    "success_auc":       f"{seq.get('success_auc', 0.0):.4f}",
+                    "precision_auc":     f"{seq.get('precision_auc', 0.0):.4f}",
+                    "fps":               f"{seq.get('fps', 0.0):.2f}",
+                    "mean_latency_ms":   f"{seq.get('mean_latency_ms', 0.0):.3f}",
+                    "peak_memory_mb":    f"{seq.get('peak_memory_mb', 0.0):.2f}",
+                    "energy_per_frame_mj": (
+                        f"{seq['energy_per_frame_mj']:.4f}"
+                        if "energy_per_frame_mj" in seq else ""
+                    ),
                 })
         return path
 
     def save_all(self, result: Dict[str, Any], name: str) -> Dict[str, Path]:
-        """Save JSON and CSV and return a mapping of format → path.
+        """Save JSON and CSV and return a mapping of format to path.
 
         Args:
-            result: Output dict from :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
+            result: Output dict from
+                :meth:`~eovot.benchmark.engine.BenchmarkResult.to_dict`.
             name: Base filename prefix.
 
         Returns:
-            ``{"json": Path(...), "csv": Path(...)}``.
+            ``{"json": Path(...), "csv": Path(...)}}``.
         """
         return {
             "json": self.save_json(result, name),
-            "csv": self.save_csv(result, name),
+            "csv":  self.save_csv(result, name),
         }
 
     # ------------------------------------------------------------------
@@ -119,7 +140,8 @@ class BenchmarkReporter:
         """Print a formatted benchmark summary block to stdout.
 
         Args:
-            result: Output dict from :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
+            result: Output dict from
+                :meth:`~eovot.benchmark.engine.BenchmarkResult.to_dict`.
         """
         summary = result.get("summary", {})
         print("\n" + "=" * 60)
@@ -137,18 +159,16 @@ class BenchmarkReporter:
         Columns: Tracker | Dataset | mIoU | Success AUC | Precision AUC | FPS | Latency (ms) | Mem (MB)
 
         Args:
-            result: Output dict from :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
+            result: Output dict from
+                :meth:`~eovot.benchmark.engine.BenchmarkResult.to_dict`.
 
         Returns:
             A ``| col | col | ... |`` formatted string (no trailing newline).
         """
         s = result.get("summary", {})
-        # "tracker" is the canonical key produced by BenchmarkResult.summary();
-        # fall back to "tracker_name" for backward compatibility with older result files.
         tracker = s.get("tracker") or s.get("tracker_name", "?")
         dataset = s.get("dataset") or s.get("dataset_name", "?")
         mean_iou = float(s.get("mean_iou", 0.0))
-        # Fall back gracefully when success/precision AUC are absent (pre-existing result files).
         success_auc = float(s.get("success_auc", mean_iou))
         precision_auc = float(s.get("precision_auc", 0.0))
         fps = float(s.get("mean_fps", 0.0))
@@ -169,17 +189,21 @@ class BenchmarkReporter:
 
         Args:
             results: List of outputs from
-                :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`,
+                :meth:`~eovot.benchmark.engine.BenchmarkResult.to_dict`,
                 one entry per tracker / dataset combination.
 
         Returns:
             A multi-line Markdown string ready to paste into a README or paper.
         """
         header = (
-            "| Tracker | Dataset | mIoU | Success AUC | Precision AUC | FPS | Latency (ms) | Mem (MB) |\n"
-            "|---------|---------|-----:|------------:|--------------:|----:|-------------:|---------:|\n"
+            "| Tracker | Dataset | mIoU | Success AUC | Precision AUC "
+            "| FPS | Latency (ms) | Mem (MB) |\n"
+            "|---------|---------|-----:|------------:|--------------:"
+            "|----:|-------------:|---------:|\n"
         )
-        rows = "\n".join(BenchmarkReporter.to_markdown_row(r) for r in results)
+        rows = "\n".join(
+            BenchmarkReporter.to_markdown_row(r) for r in results
+        )
         return header + rows
 
     def save_comparison(self, results: List[Dict[str, Any]], name: str = "comparison") -> Path:
@@ -203,9 +227,9 @@ class BenchmarkReporter:
 
 def _json_default(obj: Any) -> Any:
     """JSON serialisation fallback for non-standard types (e.g. numpy scalars)."""
-    if hasattr(obj, "item"):          # numpy scalar
+    if hasattr(obj, "item"):        # numpy scalar
         return obj.item()
-    if hasattr(obj, "tolist"):        # numpy array
+    if hasattr(obj, "tolist"):      # numpy array
         return obj.tolist()
     if hasattr(obj, "__dict__"):
         return obj.__dict__

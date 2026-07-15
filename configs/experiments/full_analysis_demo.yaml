@@ -1,0 +1,37 @@
+# Full-pipeline analysis demo — no external datasets required.
+# Runs FullAnalysisPipeline on SyntheticDataset sequences.
+#
+# Usage:
+#   python scripts/run_experiment.py --config configs/experiments/full_analysis_demo.yaml
+
+experiment:
+  name: full-analysis-demo
+  seed: 42
+  tdp_watts: null        # set to e.g. 15.0 to enable energy profiling
+
+dataset:
+  loader: SyntheticDataset
+  num_sequences: 5
+  num_frames: 100
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  motion: linear
+  name: Synthetic-Linear
+  seed: 42
+
+trackers:
+  - name: MOSSE
+    params: {}
+  - name: KCF
+    params: {}
+  - name: CSRT
+    params: {}
+
+# FullAnalysisPipeline options (passed by run_experiment.py when
+# a 'pipeline' section is present).
+pipeline:
+  output_dir: results/full_analysis_demo
+  memory_budget_mb: 512.0
+  device_names: [rpi4, jetson_nano, rpi5]   # set to [] to skip device sim
+  sustained_seconds: 60.0
+  robustness_failure_threshold: 0.1
