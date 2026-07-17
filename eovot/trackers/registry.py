@@ -29,6 +29,7 @@ from .kcf import KCFTracker
 from .median_flow import MedianFlowTracker
 from .mil import MILTracker
 from .mosse import MOSSETracker
+from .adaptive import AdaptiveTracker
 
 # Trackers that ship with plain opencv-python and require no external model
 # files — always safe to register eagerly.
@@ -39,6 +40,11 @@ TRACKER_REGISTRY: Dict[str, Type[BaseTracker]] = {
     "MIL": MILTracker,
     "MedianFlow": MedianFlowTracker,
     "CamShift": CamShiftTracker,
+    # AdaptiveTracker wraps another tracker; the registry builds the inner
+    # tracker from an "inner" param key.  Example config:
+    #   name: Adaptive-KCF
+    #   params: {inner: KCF, confidence_threshold: 0.80, max_consecutive_skips: 3}
+    "Adaptive": AdaptiveTracker,
 }
 
 # DaSiamRPN / NanoTracker need pre-trained ONNX files the user supplies
@@ -61,8 +67,18 @@ def available_trackers() -> list:
 def build_tracker(name: str, **params: Any) -> BaseTracker:
     """Instantiate a registered tracker by name.
 
+    For the ``"Adaptive"`` tracker, the ``inner`` keyword selects the
+    underlying tracker by name (looked up recursively in this registry).
+    All remaining ``params`` are forwarded to :class:`~eovot.trackers.adaptive.AdaptiveTracker`.
+
+    Example::
+
+        tracker = build_tracker("Adaptive", inner="KCF",
+                                confidence_threshold=0.80,
+                                max_consecutive_skips=3)
+
     Args:
-        name:   Registry key, e.g. ``"KCF"`` or ``"MIL"``.
+        name:   Registry key, e.g. ``"KCF"`` or ``"Adaptive"``.
         params: Keyword arguments forwarded to the tracker's constructor.
 
     Returns:
@@ -76,4 +92,8 @@ def build_tracker(name: str, **params: Any) -> BaseTracker:
         raise ValueError(
             f"Unknown tracker '{name}'. Available: {available_trackers()}"
         )
+    if cls is AdaptiveTracker:
+        inner_name = params.pop("inner", "MOSSE")
+        inner_tracker = build_tracker(inner_name)
+        return AdaptiveTracker(tracker=inner_tracker, **params)
     return cls(**params)
