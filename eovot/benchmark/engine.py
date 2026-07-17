@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 import numpy as np
 
@@ -12,6 +12,9 @@ from ..metrics.accuracy import AccuracyMetrics, MetricsEngine
 from ..profiling.energy import EnergyProfiler, EnergyResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
+
+if TYPE_CHECKING:
+    from ..metrics.attributes import AttributePerformanceTable
 
 
 @dataclass
@@ -106,6 +109,30 @@ class BenchmarkResult:
         aucs = [r.accuracy_metrics.precision_auc for r in self.sequence_results
                 if r.accuracy_metrics is not None]
         return float(np.mean(aucs)) if aucs else None
+
+    def attribute_breakdown(self) -> "AttributePerformanceTable":
+        """Compute per-attribute accuracy breakdown using auto-detected attributes.
+
+        Groups sequences by challenge attributes (fast motion, scale variation,
+        occlusion, etc.) automatically inferred from ground-truth boxes and
+        returns mean IoU and success/precision AUC per attribute group.
+
+        This enables OTB-style diagnostic analysis: understanding *where* a
+        tracker succeeds or fails across different tracking challenges.
+
+        Returns:
+            :class:`~eovot.metrics.attributes.AttributePerformanceTable` with
+            per-attribute accuracy summaries.  Only attributes present in at
+            least one sequence are included.
+
+        Example::
+
+            result = engine.run(tracker, dataset)
+            table = result.attribute_breakdown()
+            print(table.to_markdown())
+        """
+        from ..metrics.attributes import AttributeAnalyzer
+        return AttributeAnalyzer().breakdown(self)
 
     def summary(self) -> Dict:
         d: Dict = {

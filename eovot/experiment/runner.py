@@ -141,6 +141,14 @@ class ExperimentRunner:
             reporter.save_all(result_dict, name=f"{tracker_name}-{dataset_name}")
             all_results.append(result_dict)
 
+            # Save per-attribute breakdown alongside the standard JSON/CSV reports.
+            try:
+                reporter.save_attribute_markdown(
+                    result, name=f"{tracker_name}-{dataset_name}"
+                )
+            except Exception:
+                pass  # attribute analysis is best-effort; never block the main run
+
         leaderboard = self._build_leaderboard(all_results)
         leaderboard_path = exp_dir / "leaderboard.md"
         leaderboard_path.write_text(leaderboard, encoding="utf-8")

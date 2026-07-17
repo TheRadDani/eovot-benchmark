@@ -110,6 +110,38 @@ class BenchmarkReporter:
             "csv": self.save_csv(result, name),
         }
 
+    def save_attribute_markdown(
+        self,
+        benchmark_result: Any,
+        name: str,
+    ) -> Path:
+        """Compute and save a per-attribute performance breakdown as Markdown.
+
+        Automatically detects challenge attributes (fast motion, occlusion,
+        scale variation, etc.) from stored ground-truth boxes and reports
+        mean IoU and success/precision AUC per attribute group.
+
+        Args:
+            benchmark_result: A :class:`~eovot.benchmark.engine.BenchmarkResult`
+                object returned by :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
+            name: Base filename without extension for the output ``.md`` file.
+
+        Returns:
+            :class:`pathlib.Path` of the written Markdown file.
+
+        Example::
+
+            reporter = BenchmarkReporter("results/")
+            result = engine.run(tracker, dataset)
+            reporter.save_attribute_markdown(result, "MOSSE-OTB100-attributes")
+        """
+        table = benchmark_result.attribute_breakdown()
+        path = self.output_dir / f"{name}-attributes.md"
+        with open(path, "w") as fh:
+            fh.write(table.to_markdown())
+            fh.write("\n")
+        return path
+
     # ------------------------------------------------------------------
     # Formatting helpers
     # ------------------------------------------------------------------
