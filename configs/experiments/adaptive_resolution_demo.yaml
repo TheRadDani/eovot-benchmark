@@ -1,0 +1,56 @@
+# configs/experiments/adaptive_resolution_demo.yaml
+#
+# Compares AdaptiveResolutionTracker (wrapping MOSSE/KCF) against the
+# unmodified baselines on synthetic data to quantify the accuracy–efficiency
+# tradeoff introduced by dynamic resolution scaling.
+#
+# Run with:
+#   python scripts/run_experiment.py --config configs/experiments/adaptive_resolution_demo.yaml
+#
+# The AdaptiveRes wrappers are built via the "AdaptiveRes(<inner>)" registry
+# syntax.  Use target_fps to set the latency budget, and scale_pyramid to
+# control which resolutions are considered.
+
+experiment:
+  name: "adaptive-resolution-demo"
+  seed: 42
+  tdp_watts: null  # set to your device TDP (W) to enable energy profiling
+
+dataset:
+  loader: SyntheticDataset
+  num_sequences: 10
+  num_frames: 100
+  motion: "linear"
+  seed: 42
+  name: Synthetic-Linear
+
+trackers:
+  # --- Unmodified baselines ---
+  - name: MOSSE
+    params: {}
+
+  - name: KCF
+    params: {}
+
+  # --- Adaptive wrappers at different FPS budgets ---
+  # High-budget (60 FPS): prefer full resolution, only scales down under load.
+  - name: "AdaptiveRes(MOSSE)"
+    params:
+      target_fps: 60.0
+      scale_pyramid: [1.0, 0.75, 0.5]
+      warmup_frames: 5
+
+  # Medium-budget (30 FPS): typical edge-deployment target.
+  - name: "AdaptiveRes(MOSSE)"
+    params:
+      target_fps: 30.0
+      scale_pyramid: [1.0, 0.75, 0.5, 0.25]
+      warmup_frames: 5
+
+  # Aggressive (15 FPS): maximises downscaling to minimise power draw.
+  - name: "AdaptiveRes(KCF)"
+    params:
+      target_fps: 15.0
+      scale_pyramid: [1.0, 0.5, 0.25]
+      warmup_frames: 3
+      learning_rate: 0.075  # forwarded to the inner KCFTracker
