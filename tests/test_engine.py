@@ -209,3 +209,68 @@ class TestBenchmarkEngine:
         result = self.engine.run(tracker, self.dataset, dataset_name="Synthetic")
         assert result.mean_center_distance is not None
         assert result.mean_center_distance > 0.0
+
+    def test_summary_includes_latency_percentiles(self):
+        """summary() must include p50 and p99 latency keys with non-negative values."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        s = result.summary()
+        assert "mean_latency_p50_ms" in s
+        assert "mean_latency_p99_ms" in s
+        # A trivial tracker may run in < 0.001 ms and round to 0.0; just verify >= 0.
+        assert s["mean_latency_p50_ms"] >= 0.0
+        assert s["mean_latency_p99_ms"] >= 0.0
+
+    def test_to_dict_includes_latency_percentiles(self):
+        """Each sequence entry in to_dict() must carry p50 and p99 latency."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        d = result.to_dict()
+        for seq in d["sequences"]:
+            assert "latency_p50_ms" in seq, "p50 latency missing from sequence dict"
+            assert "latency_p99_ms" in seq, "p99 latency missing from sequence dict"
+
+    def test_p99_ge_p50_ge_zero(self):
+        """p99 >= p50 > 0 for any valid run."""
+        result = self.engine.run(self.tracker, self.dataset, dataset_name="Synthetic")
+        for sr in result.sequence_results:
+            assert sr.profiling.latency_p50_ms > 0.0
+            assert sr.profiling.latency_p99_ms >= sr.profiling.latency_p50_ms - 1e-9
+
+
+class TestBenchmarkEngineWarmup:
+    """Tests for the warmup_frames parameter."""
+
+    def test_warmup_reduces_measured_frames(self):
+        """frame_count in ProfilingResult should exclude warm-up frames."""
+        warmup = 3
+        engine = BenchmarkEngine(verbose=False, warmup_frames=warmup)
+        tracker = ConstantTracker(FIXED_BOX)
+        dataset = SyntheticDataset(n_sequences=1)
+        result = engine.run(tracker, dataset, dataset_name="Synthetic")
+        sr = result.sequence_results[0]
+        # Total update frames = NUM_FRAMES - 1 (frame 0 is initialize, not profiled).
+        # Warm-up excludes first `warmup` of those.
+        expected_measured = NUM_FRAMES - 1 - warmup
+        assert sr.profiling.frame_count == expected_measured
+
+    def test_warmup_excluded_count_in_profiling_result(self):
+        """warmup_frames_excluded field must equal the configured warm-up count."""
+        engine = BenchmarkEngine(verbose=False, warmup_frames=2)
+        tracker = ConstantTracker(FIXED_BOX)
+        dataset = SyntheticDataset(n_sequences=1)
+        result = engine.run(tracker, dataset, dataset_name="Synthetic")
+        assert result.sequence_results[0].profiling.warmup_frames_excluded == 2
+
+    def test_warmup_zero_is_backward_compatible(self):
+        """warmup_frames=0 (default) should behave identically to the old engine."""
+        engine_new = BenchmarkEngine(verbose=False, warmup_frames=0)
+        engine_old = BenchmarkEngine(verbose=False)
+        tracker1 = ConstantTracker(FIXED_BOX)
+        tracker2 = ConstantTracker(FIXED_BOX)
+        dataset = SyntheticDataset(n_sequences=2)
+        r1 = engine_new.run(tracker1, dataset, dataset_name="Synthetic")
+        r2 = engine_old.run(tracker2, dataset, dataset_name="Synthetic")
+        assert r1.sequence_results[0].profiling.frame_count == r2.sequence_results[0].profiling.frame_count
+
+    def test_negative_warmup_raises(self):
+        with pytest.raises(ValueError):
+            BenchmarkEngine(verbose=False, warmup_frames=-1)

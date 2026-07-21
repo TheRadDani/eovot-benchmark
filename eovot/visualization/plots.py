@@ -6,7 +6,8 @@ All plotting functions accept result dicts produced by
     {
         "summary": {"tracker_name": ..., "mean_iou": ..., "mean_fps": ..., ...},
         "sequences": [
-            {"sequence_name": ..., "ious": [...], "fps": ..., ...},
+            {"sequence_name": ..., "ious": [...], "fps": ...,
+             "mean_latency_ms": ..., "latency_p50_ms": ..., "latency_p99_ms": ..., ...},
             ...
         ]
     }
@@ -18,7 +19,12 @@ Requires ``matplotlib``.  Install with::
 Example::
 
     import json
-    from eovot.visualization.plots import plot_success_curves, plot_tracker_comparison
+    from eovot.visualization.plots import (
+        plot_success_curves,
+        plot_tracker_comparison,
+        plot_latency_cdf,
+        plot_latency_histogram,
+    )
 
     with open("results/MOSSE-OTB100.json") as f:
         mosse = json.load(f)
@@ -27,6 +33,8 @@ Example::
 
     plot_success_curves([mosse, kcf], output_path="success_curves.png")
     plot_tracker_comparison([mosse, kcf], output_path="comparison.png")
+    plot_latency_cdf([mosse, kcf], output_path="latency_cdf.png")
+    plot_latency_histogram([mosse, kcf], output_path="latency_hist.png")
 """
 
 from __future__ import annotations
@@ -286,5 +294,185 @@ def plot_tracker_comparison(
         fig.savefig(output_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
         print(f"[plot] Tracker comparison saved → {output_path}")
+    else:
+        plt.show()
+
+
+def _collect_per_sequence_latencies(result: Dict[str, Any]) -> np.ndarray:
+    """Gather per-sequence mean latency values from a result dict.
+
+    Uses ``"mean_latency_ms"`` from each sequence entry; sequences missing
+    this field are skipped.  Falls back gracefully for legacy result files.
+    """
+    lats = [
+        float(seq["mean_latency_ms"])
+        for seq in result.get("sequences", [])
+        if "mean_latency_ms" in seq
+    ]
+    return np.array(lats, dtype=np.float64)
+
+
+def plot_latency_cdf(
+    results: List[Dict[str, Any]],
+    output_path: Optional[str] = None,
+    title: str = "Latency CDF",
+    deadline_ms: Optional[float] = None,
+) -> None:
+    """Plot the empirical CDF of per-sequence mean latencies.
+
+    The Cumulative Distribution Function (CDF) of latency reveals the
+    fraction of sequences (or frames) processed within a given time budget.
+    For real-time systems, the key question is: "What fraction of sequences
+    finish within the deadline?"
+
+    Args:
+        results: List of dicts from :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
+        output_path: Save path.  Interactive display when ``None``.
+        title: Figure title.
+        deadline_ms: If provided, draw a vertical red dashed line at this
+            latency value to visualise the real-time deadline.  E.g.
+            ``33.3`` for 30 FPS or ``16.7`` for 60 FPS.
+
+    Example::
+
+        plot_latency_cdf(
+            [mosse_result, kcf_result],
+            output_path="latency_cdf.png",
+            deadline_ms=33.3,   # 30 FPS deadline
+        )
+    """
+    plt = _get_matplotlib()
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    any_data = False
+
+    for result in results:
+        s = result.get("summary", {})
+        tracker_name = s.get("tracker") or s.get("tracker_name", "unknown")
+        lats = _collect_per_sequence_latencies(result)
+        if len(lats) == 0:
+            continue
+        any_data = True
+        sorted_lats = np.sort(lats)
+        cdf = np.arange(1, len(sorted_lats) + 1) / len(sorted_lats)
+        p50 = float(np.percentile(lats, 50))
+        p99 = float(np.percentile(lats, 99))
+        ax.plot(
+            sorted_lats,
+            cdf,
+            label=f"{tracker_name} (p50={p50:.1f}ms, p99={p99:.1f}ms)",
+            linewidth=2,
+        )
+
+    if deadline_ms is not None:
+        ax.axvline(
+            deadline_ms,
+            color="red",
+            linestyle="--",
+            linewidth=1.5,
+            label=f"Deadline ({deadline_ms:.1f} ms)",
+        )
+
+    if not any_data:
+        ax.text(
+            0.5, 0.5,
+            "No latency data available.\nRun BenchmarkEngine and save results to JSON.",
+            ha="center", va="center", transform=ax.transAxes, fontsize=11,
+        )
+
+    ax.set_xlabel("Mean Latency per Sequence (ms)", fontsize=12)
+    ax.set_ylabel("Cumulative Fraction of Sequences", fontsize=12)
+    ax.set_title(title, fontsize=14)
+    ax.set_ylim(0.0, 1.05)
+    ax.legend(fontsize=11, loc="lower right")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+
+    if output_path:
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"[plot] Latency CDF saved → {output_path}")
+    else:
+        plt.show()
+
+
+def plot_latency_histogram(
+    results: List[Dict[str, Any]],
+    output_path: Optional[str] = None,
+    title: str = "Latency Distribution",
+    bins: int = 20,
+    deadline_ms: Optional[float] = None,
+) -> None:
+    """Plot overlapping histograms of per-sequence mean latency for each tracker.
+
+    Complements the CDF view by showing the shape of the latency distribution —
+    whether it is unimodal, has a heavy tail, or has bimodal spikes.  This
+    is particularly useful for identifying sequences where a tracker occasionally
+    fails and takes disproportionately long.
+
+    Args:
+        results: List of dicts from :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
+        output_path: Save path.  Interactive display when ``None``.
+        title: Figure title.
+        bins: Number of histogram bins.  Default: ``20``.
+        deadline_ms: If provided, draw a vertical red dashed line at this
+            latency value to mark the real-time deadline.
+
+    Example::
+
+        plot_latency_histogram(
+            [mosse_result, kcf_result, csrt_result],
+            output_path="latency_hist.png",
+            deadline_ms=33.3,
+        )
+    """
+    plt = _get_matplotlib()
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    any_data = False
+
+    for result in results:
+        s = result.get("summary", {})
+        tracker_name = s.get("tracker") or s.get("tracker_name", "unknown")
+        lats = _collect_per_sequence_latencies(result)
+        if len(lats) == 0:
+            continue
+        any_data = True
+        ax.hist(
+            lats,
+            bins=bins,
+            alpha=0.55,
+            label=f"{tracker_name} (n={len(lats)})",
+            edgecolor="white",
+            linewidth=0.5,
+        )
+
+    if deadline_ms is not None:
+        ax.axvline(
+            deadline_ms,
+            color="red",
+            linestyle="--",
+            linewidth=1.5,
+            label=f"Deadline ({deadline_ms:.1f} ms)",
+        )
+
+    if not any_data:
+        ax.text(
+            0.5, 0.5,
+            "No latency data available.",
+            ha="center", va="center", transform=ax.transAxes, fontsize=11,
+        )
+
+    ax.set_xlabel("Mean Latency per Sequence (ms)", fontsize=12)
+    ax.set_ylabel("Number of Sequences", fontsize=12)
+    ax.set_title(title, fontsize=14)
+    ax.legend(fontsize=11)
+    ax.grid(True, axis="y", alpha=0.3)
+    fig.tight_layout()
+
+    if output_path:
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"[plot] Latency histogram saved → {output_path}")
     else:
         plt.show()
