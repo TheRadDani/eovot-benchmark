@@ -63,14 +63,40 @@ class BenchmarkReporter:
             json.dump(result, fh, indent=2, default=_json_default)
         return path
 
+    # Fixed core CSV columns — always present in engine output.
+    _CSV_CORE_FIELDS = [
+        "sequence_name",
+        "mean_iou",
+        "fps",
+        "mean_latency_ms",
+        "peak_memory_mb",
+    ]
+    # Optional columns — written only when the first sequence carries them.
+    _CSV_OPTIONAL_FIELDS = [
+        "success_auc",
+        "precision_auc",
+        "energy_j",
+        "energy_per_frame_mj",
+    ]
+
     def save_csv(self, result: Dict[str, Any], name: str) -> Path:
         """Write per-sequence metrics to a CSV file.
 
-        Columns: ``sequence_name``, ``mean_iou``, ``precision_score``,
-        ``fps``, ``mean_latency_ms``.
+        Columns always present: ``sequence_name``, ``mean_iou``, ``fps``,
+        ``mean_latency_ms``, ``peak_memory_mb``.
+
+        Optional columns (included when the engine produced them):
+        ``success_auc``, ``precision_auc``, ``energy_j``,
+        ``energy_per_frame_mj``.
+
+        The previous ``precision_score`` column has been removed — it was
+        never populated by the engine and always wrote ``0.0000``.  The
+        correct column name is ``precision_auc``.
 
         Args:
-            result: Output dict from :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
+            result: Output dict from
+                :meth:`~eovot.benchmark.engine.BenchmarkEngine.run` or
+                :meth:`~eovot.benchmark.engine.BenchmarkResult.to_dict`.
             name: Base filename without extension.
 
         Returns:
@@ -81,18 +107,28 @@ class BenchmarkReporter:
         if not sequences:
             return path
 
-        fieldnames = ["sequence_name", "mean_iou", "precision_score", "fps", "mean_latency_ms"]
+        # Discover which optional columns are actually present.
+        optional_present = [
+            col for col in self._CSV_OPTIONAL_FIELDS
+            if any(col in seq for seq in sequences)
+        ]
+        fieldnames = self._CSV_CORE_FIELDS + optional_present
+
         with open(path, "w", newline="") as fh:
-            writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             for seq in sequences:
-                writer.writerow({
+                row: Dict[str, Any] = {
                     "sequence_name": seq.get("sequence_name", ""),
                     "mean_iou": f"{seq.get('mean_iou', 0.0):.4f}",
-                    "precision_score": f"{seq.get('precision_score', 0.0):.4f}",
                     "fps": f"{seq.get('fps', 0.0):.2f}",
                     "mean_latency_ms": f"{seq.get('mean_latency_ms', 0.0):.3f}",
-                })
+                    "peak_memory_mb": f"{seq.get('peak_memory_mb', 0.0):.2f}",
+                }
+                for col in optional_present:
+                    val = seq.get(col, "")
+                    row[col] = f"{val:.6f}" if isinstance(val, (int, float)) else val
+                writer.writerow(row)
         return path
 
     def save_all(self, result: Dict[str, Any], name: str) -> Dict[str, Path]:
@@ -198,6 +234,100 @@ class BenchmarkReporter:
             fh.write("# EOVOT Tracker Comparison\n\n")
             fh.write(table)
             fh.write("\n")
+        return path
+
+    def save_comparison_csv(
+        self,
+        results: List[Dict[str, Any]],
+        name: str = "comparison",
+        sort_by: str = "success_auc",
+    ) -> Path:
+        """Write a summary-level comparison CSV, one row per tracker/dataset.
+
+        This is the canonical output for importing benchmark results into
+        spreadsheet tools, pandas, or R for downstream statistical analysis.
+        Results are sorted by ``sort_by`` (descending); falls back to
+        ``"mean_iou"`` when the key is absent.
+
+        Columns: ``tracker``, ``dataset``, ``num_sequences``, ``mean_iou``,
+        ``success_auc``, ``precision_auc``, ``mean_fps``, ``peak_memory_mb``,
+        ``mean_latency_ms``, ``total_energy_j``, ``mean_energy_per_frame_mj``.
+
+        Optional energy columns are omitted when none of the results carry them.
+
+        Args:
+            results: List of dicts from
+                :meth:`~eovot.benchmark.engine.BenchmarkResult.to_dict`.
+            name: Output filename without extension. Default: ``"comparison"``.
+            sort_by: Summary key to sort by (descending). Default:
+                ``"success_auc"``.
+
+        Returns:
+            :class:`pathlib.Path` of the written ``.csv`` file.
+        """
+        summaries = [r.get("summary", r) for r in results]
+
+        # Determine sort key — fall back to mean_iou when absent.
+        def _sort_key(s: Dict) -> float:
+            val = s.get(sort_by, s.get("mean_iou", 0.0))
+            return float(val) if val is not None else 0.0
+
+        summaries_sorted = sorted(summaries, key=_sort_key, reverse=True)
+
+        # Discover optional columns.
+        has_energy = any(
+            "total_energy_j" in s or "mean_energy_per_frame_mj" in s
+            for s in summaries_sorted
+        )
+        has_sauc = any("success_auc" in s for s in summaries_sorted)
+        has_pauc = any("precision_auc" in s for s in summaries_sorted)
+        has_lat = any("mean_latency_ms" in s or "mean_fps" in s for s in summaries_sorted)
+
+        fieldnames = ["tracker", "dataset", "num_sequences", "mean_iou"]
+        if has_sauc:
+            fieldnames.append("success_auc")
+        if has_pauc:
+            fieldnames.append("precision_auc")
+        fieldnames.append("mean_fps")
+        fieldnames.append("peak_memory_mb")
+        if has_lat:
+            fieldnames.append("mean_latency_ms")
+        if has_energy:
+            fieldnames += ["total_energy_j", "mean_energy_per_frame_mj"]
+
+        path = self.output_dir / f"{name}.csv"
+        with open(path, "w", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+            writer.writeheader()
+            for s in summaries_sorted:
+                tracker = s.get("tracker") or s.get("tracker_name", "?")
+                dataset = s.get("dataset") or s.get("dataset_name", "?")
+                row: Dict[str, Any] = {
+                    "tracker": tracker,
+                    "dataset": dataset,
+                    "num_sequences": s.get("num_sequences", ""),
+                    "mean_iou": f"{float(s.get('mean_iou', 0.0)):.4f}",
+                }
+                if has_sauc:
+                    row["success_auc"] = f"{float(s.get('success_auc', s.get('mean_iou', 0.0))):.4f}"
+                if has_pauc:
+                    row["precision_auc"] = f"{float(s.get('precision_auc', 0.0)):.4f}"
+                row["mean_fps"] = f"{float(s.get('mean_fps', 0.0)):.2f}"
+                row["peak_memory_mb"] = f"{float(s.get('peak_memory_mb', 0.0)):.2f}"
+                if has_lat:
+                    lat = s.get("mean_latency_ms") or (
+                        1000.0 / float(s["mean_fps"]) if s.get("mean_fps") else ""
+                    )
+                    row["mean_latency_ms"] = f"{float(lat):.3f}" if lat != "" else ""
+                if has_energy:
+                    row["total_energy_j"] = (
+                        f"{float(s['total_energy_j']):.6f}" if "total_energy_j" in s else ""
+                    )
+                    row["mean_energy_per_frame_mj"] = (
+                        f"{float(s['mean_energy_per_frame_mj']):.4f}"
+                        if "mean_energy_per_frame_mj" in s else ""
+                    )
+                writer.writerow(row)
         return path
 
 
