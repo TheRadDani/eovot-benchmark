@@ -107,6 +107,16 @@ class BenchmarkResult:
                 if r.accuracy_metrics is not None]
         return float(np.mean(aucs)) if aucs else None
 
+    @property
+    def mean_latency_p50_ms(self) -> float:
+        """Mean p50 (median) latency across sequences in milliseconds."""
+        return float(np.mean([r.profiling.latency_p50_ms for r in self.sequence_results]))
+
+    @property
+    def mean_latency_p99_ms(self) -> float:
+        """Mean p99 latency across sequences in milliseconds."""
+        return float(np.mean([r.profiling.latency_p99_ms for r in self.sequence_results]))
+
     def summary(self) -> Dict:
         d: Dict = {
             "tracker": self.tracker_name,
@@ -114,6 +124,8 @@ class BenchmarkResult:
             "num_sequences": len(self.sequence_results),
             "mean_iou": round(self.mean_iou, 4),
             "mean_fps": round(self.mean_fps, 2),
+            "mean_latency_p50_ms": round(self.mean_latency_p50_ms, 3),
+            "mean_latency_p99_ms": round(self.mean_latency_p99_ms, 3),
             "peak_memory_mb": round(self.peak_memory_mb, 2),
         }
         mcd = self.mean_center_distance
@@ -147,6 +159,10 @@ class BenchmarkResult:
                 "mean_iou": round(r.mean_iou, 4),
                 "fps": round(r.profiling.fps, 2),
                 "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
+                "latency_std_ms": round(r.profiling.latency_std_ms, 3),
+                "latency_p50_ms": round(r.profiling.latency_p50_ms, 3),
+                "latency_p95_ms": round(r.profiling.latency_p95_ms, 3),
+                "latency_p99_ms": round(r.profiling.latency_p99_ms, 3),
                 "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
             }
             if r.accuracy_metrics is not None:
@@ -185,12 +201,32 @@ class BenchmarkEngine:
             value (Watts).  Set to the device's CPU TDP for meaningful
             estimates (e.g. ``6.0`` for Raspberry Pi 4, ``15.0`` for a
             laptop).  Default: ``None`` (energy profiling disabled).
+        warmup_frames: Number of frames to run through the tracker at the
+            start of each sequence before latency measurement begins.
+            These frames are profiled but excluded from the summary
+            statistics, eliminating JIT-compilation and CPU-cache cold-start
+            bias.  Must be strictly less than the shortest sequence length.
+            Default: ``0`` (no warm-up; backward compatible).
+
+    Example — edge-deployment benchmark with 5-frame warm-up and energy::
+
+        engine = BenchmarkEngine(warmup_frames=5, tdp_watts=10.0)
+        result = engine.run(tracker, dataset, "GOT-10k")
+        print(result.summary())
     """
 
-    def __init__(self, verbose: bool = True, tdp_watts: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        verbose: bool = True,
+        tdp_watts: Optional[float] = None,
+        warmup_frames: int = 0,
+    ) -> None:
+        if warmup_frames < 0:
+            raise ValueError(f"warmup_frames must be >= 0, got {warmup_frames}")
         self.verbose = verbose
+        self.warmup_frames = warmup_frames
         self._metrics = MetricsEngine()
-        self._profiler = Profiler()
+        self._profiler = Profiler(warmup_frames=warmup_frames)
         self._energy_profiler: Optional[EnergyProfiler] = (
             EnergyProfiler(tdp_watts=tdp_watts) if tdp_watts is not None else None
         )
