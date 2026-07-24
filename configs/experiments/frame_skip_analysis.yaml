@@ -1,0 +1,29 @@
+# Frame-skip accuracy-speed tradeoff analysis configuration.
+#
+# Usage:
+#   python scripts/analyze_frame_skip.py --config configs/experiments/frame_skip_analysis.yaml
+
+tracker:
+  name: MOSSE
+  params: {}               # Pass tracker-specific params here, e.g. learning_rate: 0.1
+
+dataset:
+  synthetic: true          # Set to false and fill root/name for a real dataset
+  num_sequences: 10        # Number of synthetic sequences to generate
+  num_frames: 150          # Frames per synthetic sequence
+  # root: /data/OTB100     # Uncomment and fill for a real OTB-style dataset
+  # name: OTB100
+
+# Skip rates to sweep. Must include 1 (the no-skip baseline).
+skip_rates: [1, 2, 3, 4, 6]
+
+# Propagation mode for skipped frames: "repeat" or "linear"
+mode: repeat
+
+# Limit evaluation to the first N sequences (null = all)
+max_sequences: null
+
+# Report the optimal skip rate that keeps mIoU above this threshold (null = skip)
+min_iou: 0.80
+
+quiet: false
