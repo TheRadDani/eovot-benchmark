@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 
@@ -173,6 +175,143 @@ class BenchmarkResult:
         if "total_energy_j" in s:
             base += f"  energy={s['total_energy_j']} J"
         return base
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def save(self, path: Union[str, Path]) -> Path:
+        """Serialise this result to a JSON file at *path*.
+
+        The file can be loaded back with :meth:`load`, fully reconstructing
+        per-sequence metrics and profiling summaries.
+
+        Args:
+            path: Destination file path.  Parent directories are created
+                automatically.  A ``.json`` extension is appended when the
+                path has none.
+
+        Returns:
+            The resolved :class:`pathlib.Path` that was written.
+        """
+        p = Path(path)
+        if not p.suffix:
+            p = p.with_suffix(".json")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "w", encoding="utf-8") as fh:
+            json.dump(self.to_dict(), fh, indent=2, default=_json_default)
+        return p
+
+    @classmethod
+    def load(cls, path: Union[str, Path]) -> "BenchmarkResult":
+        """Deserialise a :class:`BenchmarkResult` from a JSON file.
+
+        Reconstructs all per-sequence IoU arrays, profiling summaries,
+        accuracy metrics, and (when present) energy estimates from the file
+        written by :meth:`save` or :meth:`to_dict`.
+
+        Args:
+            path: Path to the JSON file produced by :meth:`save`.
+
+        Returns:
+            A fully populated :class:`BenchmarkResult` object.
+
+        Raises:
+            FileNotFoundError: If *path* does not exist.
+            KeyError: If required keys are absent from the JSON.
+        """
+        with open(path, "r", encoding="utf-8") as fh:
+            d = json.load(fh)
+        return cls.from_dict(d)
+
+    @classmethod
+    def from_dict(cls, d: Dict) -> "BenchmarkResult":
+        """Reconstruct a :class:`BenchmarkResult` from its :meth:`to_dict` output.
+
+        Fields that are not stored in the serialised format (e.g. raw
+        per-frame latency distributions, ground-truth boxes) are approximated
+        from the available scalar summaries.
+
+        Args:
+            d: Dict produced by :meth:`to_dict`.
+
+        Returns:
+            A :class:`BenchmarkResult` with all stored metrics populated.
+        """
+        from ..profiling.profiler import ProfilingResult
+        from ..profiling.energy import EnergyResult
+        from ..metrics.accuracy import AccuracyMetrics
+
+        summary = d["summary"]
+        tracker_name: str = summary.get("tracker") or summary.get("tracker_name", "unknown")
+        dataset_name: str = summary.get("dataset") or summary.get("dataset_name", "unknown")
+
+        seq_results: List[SequenceResult] = []
+        for seq in d.get("sequences", []):
+            seq_name: str = seq["sequence_name"]
+            ious = np.array(seq.get("ious", [seq.get("mean_iou", 0.0)]), dtype=np.float64)
+            dists = (
+                np.array(seq["center_distances"], dtype=np.float64)
+                if "center_distances" in seq else None
+            )
+            fps: float = float(seq.get("fps", 0.0))
+            lat_ms: float = float(seq.get("mean_latency_ms", 1000.0 / fps if fps > 0 else 0.0))
+            mem_mb: float = float(seq.get("peak_memory_mb", 0.0))
+
+            profiling = ProfilingResult(
+                tracker_name=tracker_name,
+                frame_count=len(ious),
+                fps=fps,
+                latency_mean_ms=lat_ms,
+                latency_std_ms=0.0,
+                latency_p95_ms=lat_ms,
+                peak_memory_mb=mem_mb,
+            )
+
+            accuracy: Optional[AccuracyMetrics] = None
+            if "success_auc" in seq:
+                accuracy = AccuracyMetrics(
+                    mean_iou=float(seq.get("mean_iou", float(ious.mean()) if len(ious) else 0.0)),
+                    success_auc=float(seq["success_auc"]),
+                    precision_auc=float(seq.get("precision_auc", 0.0)),
+                )
+
+            energy: Optional[EnergyResult] = None
+            if "energy_j" in seq:
+                energy = EnergyResult(
+                    tracker_name=tracker_name,
+                    frame_count=len(ious),
+                    tdp_watts=0.0,
+                    total_energy_j=float(seq["energy_j"]),
+                    mean_power_w=0.0,
+                    energy_per_frame_mj=float(seq.get("energy_per_frame_mj", 0.0)),
+                    peak_cpu_pct=0.0,
+                    mean_cpu_pct=0.0,
+                )
+
+            seq_results.append(
+                SequenceResult(
+                    sequence_name=seq_name,
+                    ious=ious,
+                    profiling=profiling,
+                    center_distances=dists,
+                    energy=energy,
+                    accuracy_metrics=accuracy,
+                )
+            )
+
+        result = cls(tracker_name=tracker_name, dataset_name=dataset_name)
+        result.sequence_results = seq_results
+        return result
+
+
+def _json_default(obj):
+    """Fallback serialiser for non-standard types inside :meth:`BenchmarkResult.save`."""
+    if hasattr(obj, "item"):
+        return obj.item()
+    if hasattr(obj, "tolist"):
+        return obj.tolist()
+    return str(obj)
 
 
 class BenchmarkEngine:
