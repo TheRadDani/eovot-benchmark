@@ -6,6 +6,12 @@ from .median_flow import MedianFlowTracker
 from .mil import MILTracker
 from .camshift import CamShiftTracker
 from .registry import TRACKER_REGISTRY, available_trackers, build_tracker
+from .adaptive_skip import (
+    AdaptiveSkipPolicy,
+    AdaptiveSkipTracker,
+    BudgetAdaptivePolicy,
+    VelocityAdaptivePolicy,
+)
 
 __all__ = [
     "BaseTracker",
@@ -19,4 +25,8 @@ __all__ = [
     "TRACKER_REGISTRY",
     "available_trackers",
     "build_tracker",
+    "AdaptiveSkipPolicy",
+    "AdaptiveSkipTracker",
+    "BudgetAdaptivePolicy",
+    "VelocityAdaptivePolicy",
 ]

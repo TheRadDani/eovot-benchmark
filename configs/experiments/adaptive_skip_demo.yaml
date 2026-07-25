@@ -1,0 +1,55 @@
+# Adaptive frame-skip demo — compares fixed vs. velocity-adaptive skip policies.
+#
+# Runs three tracker variants on a synthetic dataset so no real data download is
+# needed.  Replace `loader: SyntheticDataset` and the root/split settings with a
+# real dataset (GOT10kDataset, LaSOTDataset, OTBDataset) for production use.
+#
+# Usage:
+#   python scripts/run_experiment.py --config configs/experiments/adaptive_skip_demo.yaml
+
+experiment:
+  name: adaptive-skip-demo
+  seed: 42
+  tdp_watts: null        # set to e.g. 7.5 to enable energy profiling
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-Random
+  num_sequences: 5
+  num_frames: 100
+  motion: random         # "linear" | "circular" | "random"
+  seed: 0
+
+# Tracker list: baseline MOSSE, fixed skip-2, and two adaptive variants.
+trackers:
+  - name: MOSSE
+    params: {}
+
+  - name: MOSSE
+    params: {}
+    wrapper:
+      type: FrameSkipTracker
+      skip_rate: 2
+
+  - name: MOSSE
+    params: {}
+    wrapper:
+      type: AdaptiveSkipTracker
+      policy: VelocityAdaptivePolicy
+      policy_params:
+        min_skip: 1
+        max_skip: 4
+        low_threshold: 0.02
+        high_threshold: 0.15
+
+  - name: MOSSE
+    params: {}
+    wrapper:
+      type: AdaptiveSkipTracker
+      policy: BudgetAdaptivePolicy
+      policy_params:
+        fps_budget: 30.0
+        min_skip: 1
+        max_skip: 4
+
+output_dir: results/experiments/adaptive-skip-demo
