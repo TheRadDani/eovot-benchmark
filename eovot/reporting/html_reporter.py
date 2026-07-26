@@ -1,0 +1,330 @@
+"""Self-contained HTML benchmark report generator.
+
+Produces a single ``.html`` file with all charts embedded as base64 PNGs,
+summary tables, and metadata — no external dependencies required for viewing.
+
+Typical usage::
+
+    from eovot.benchmark.engine import BenchmarkResult
+    from eovot.reporting.html_reporter import HTMLReporter
+
+    reporter = HTMLReporter(output_dir="results/reports")
+    path = reporter.generate(results, title="KCF vs MOSSE on OTB-100")
+    print(f"Report saved to {path}")
+"""
+
+from __future__ import annotations
+
+import base64
+import io
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import List, Optional
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+
+# np.trapezoid (NumPy >= 2.0) replaced np.trapz (removed in 2.0).
+_trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz  # type: ignore[attr-defined]
+
+from ..metrics.accuracy import MetricsEngine
+from ..metrics.efficiency import EfficiencyMetricsEngine
+
+
+class HTMLReporter:
+    """Generate a self-contained HTML benchmark report.
+
+    All charts are rendered with matplotlib (Agg backend) and embedded as
+    base64-encoded PNGs.  The output is a single file with no external
+    stylesheet, script, or image dependencies.
+
+    Args:
+        output_dir: Directory to write the HTML file (created if absent).
+        memory_budget_mb: Memory budget for Edge Efficiency Score computation.
+            Default: ``512.0`` MB.
+        dpi: Figure DPI for embedded charts.  Default: ``96``.
+    """
+
+    def __init__(
+        self,
+        output_dir: str = ".",
+        memory_budget_mb: float = 512.0,
+        dpi: int = 96,
+    ) -> None:
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._eff_engine = EfficiencyMetricsEngine(memory_budget_mb=memory_budget_mb)
+        self._metrics = MetricsEngine()
+        self._dpi = dpi
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def generate(
+        self,
+        results: List,
+        title: str = "EOVOT Benchmark Report",
+        name: str = "report",
+    ) -> Path:
+        """Generate a self-contained HTML benchmark report.
+
+        Args:
+            results: List of :class:`~eovot.benchmark.engine.BenchmarkResult`
+                objects, one per tracker.
+            title: Report title shown in the page header.
+            name: Output filename stem (appended with ``.html``).
+
+        Returns:
+            :class:`pathlib.Path` of the written HTML file.
+        """
+        html = self._build_html(results, title)
+        out_path = self.output_dir / f"{name}.html"
+        out_path.write_text(html, encoding="utf-8")
+        return out_path
+
+    # ------------------------------------------------------------------
+    # HTML assembly
+    # ------------------------------------------------------------------
+
+    def _build_html(self, results: List, title: str) -> str:
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        dataset_name = results[0].dataset_name if results else "N/A"
+
+        summary_html = self._summary_table(results)
+        success_img = self._success_curve_chart(results)
+        precision_img = self._precision_curve_chart(results)
+        efficiency_img = self._efficiency_scatter_chart(results)
+
+        return (
+            "<!DOCTYPE html>\n"
+            "<html lang=\"en\">\n"
+            "<head>\n"
+            "<meta charset=\"UTF-8\">\n"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+            f"<title>{title}</title>\n"
+            "<style>\n"
+            f"{self._css()}\n"
+            "</style>\n"
+            "</head>\n"
+            "<body>\n"
+            "<div class=\"container\">\n"
+            "  <header>\n"
+            f"    <h1>{title}</h1>\n"
+            f"    <p class=\"meta\">Dataset: <strong>{dataset_name}</strong>"
+            f"&nbsp;|&nbsp;Generated: {timestamp}</p>\n"
+            "  </header>\n"
+            "\n"
+            "  <section>\n"
+            "    <h2>Performance Summary</h2>\n"
+            f"    {summary_html}\n"
+            "  </section>\n"
+            "\n"
+            "  <section>\n"
+            "    <h2>Accuracy Curves</h2>\n"
+            "    <div class=\"chart-row\">\n"
+            f"      <div class=\"chart\"><h3>Success (IoU) Curve</h3>{success_img}</div>\n"
+            f"      <div class=\"chart\"><h3>Precision Curve</h3>{precision_img}</div>\n"
+            "    </div>\n"
+            "  </section>\n"
+            "\n"
+            "  <section>\n"
+            "    <h2>Efficiency Analysis</h2>\n"
+            f"    {efficiency_img}\n"
+            "  </section>\n"
+            "\n"
+            "  <footer>\n"
+            "    <p>Generated by "
+            "<a href=\"https://github.com/TheRadDani/eovot-benchmark\">EOVOT Benchmark Suite</a>"
+            "</p>\n"
+            "  </footer>\n"
+            "</div>\n"
+            "</body>\n"
+            "</html>"
+        )
+
+    # ------------------------------------------------------------------
+    # Summary table
+    # ------------------------------------------------------------------
+
+    def _summary_table(self, results: List) -> str:
+        if not results:
+            return "<p><em>No results to display.</em></p>"
+
+        entries = self._eff_engine.rank_trackers(results)
+
+        rows = []
+        for rank, e in enumerate(entries, start=1):
+            pareto = "&#10003;" if e.on_pareto_front else ""
+            rows.append(
+                f"    <tr>"
+                f"<td>{rank}</td>"
+                f"<td class=\"name\">{e.tracker_name}</td>"
+                f"<td>{e.mean_iou:.4f}</td>"
+                f"<td>{e.fps:.1f}</td>"
+                f"<td>{e.peak_memory_mb:.1f}</td>"
+                f"<td>{e.ees:.4f}</td>"
+                f"<td class=\"pareto\">{pareto}</td>"
+                f"</tr>"
+            )
+
+        rows_html = "\n".join(rows)
+        return (
+            "<table>\n"
+            "  <thead><tr>"
+            "<th>Rank</th><th>Tracker</th><th>mIoU</th>"
+            "<th>FPS</th><th>Mem&nbsp;(MB)</th><th>EES</th><th>Pareto</th>"
+            "</tr></thead>\n"
+            "  <tbody>\n"
+            f"{rows_html}\n"
+            "  </tbody>\n"
+            "</table>"
+        )
+
+    # ------------------------------------------------------------------
+    # Chart helpers
+    # ------------------------------------------------------------------
+
+    def _success_curve_chart(self, results: List) -> str:
+        fig, ax = plt.subplots(figsize=(5, 3.5), dpi=self._dpi)
+        thresholds = np.linspace(0.0, 1.0, 101)
+
+        for result in results:
+            all_ious = np.concatenate([r.ious for r in result.sequence_results])
+            if len(all_ious) == 0:
+                continue
+            _, rates = self._metrics.success_curve(all_ious, thresholds=thresholds)
+            auc = float(_trapezoid(rates, thresholds))
+            ax.plot(thresholds, rates, label=f"{result.tracker_name} [{auc:.3f}]")
+
+        ax.set_xlabel("IoU threshold")
+        ax.set_ylabel("Success rate")
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        img_tag = self._fig_to_img_tag(fig)
+        plt.close(fig)
+        return img_tag
+
+    def _precision_curve_chart(self, results: List) -> str:
+        fig, ax = plt.subplots(figsize=(5, 3.5), dpi=self._dpi)
+        thresholds = np.linspace(0.0, 50.0, 51)
+
+        for result in results:
+            all_preds, all_gts = self._gather_pred_gt(result)
+            if all_preds is None:
+                continue
+            _, rates = self._metrics.precision_curve(
+                all_preds, all_gts, thresholds=thresholds
+            )
+            auc = float(_trapezoid(rates, thresholds) / thresholds[-1])
+            ax.plot(thresholds, rates, label=f"{result.tracker_name} [{auc:.3f}]")
+
+        ax.set_xlabel("Centre-distance threshold (px)")
+        ax.set_ylabel("Precision rate")
+        ax.set_xlim(0, 50)
+        ax.set_ylim(0, 1)
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        img_tag = self._fig_to_img_tag(fig)
+        plt.close(fig)
+        return img_tag
+
+    def _efficiency_scatter_chart(self, results: List) -> str:
+        """Accuracy vs FPS scatter; bubble area proportional to peak memory."""
+        fig, ax = plt.subplots(figsize=(6, 4), dpi=self._dpi)
+
+        entries = self._eff_engine.rank_trackers(results)
+        max_mem = max((e.peak_memory_mb for e in entries), default=1.0) or 1.0
+
+        for e in entries:
+            size = 200 * (e.peak_memory_mb / max_mem) + 50
+            edge = "black" if e.on_pareto_front else "none"
+            lw = 1.5 if e.on_pareto_front else 0
+            ax.scatter(e.fps, e.mean_iou, s=size, linewidths=lw, edgecolors=edge,
+                       alpha=0.75, label=e.tracker_name, zorder=3)
+            ax.annotate(e.tracker_name, (e.fps, e.mean_iou),
+                        textcoords="offset points", xytext=(6, 4), fontsize=7)
+
+        ax.set_xlabel("FPS")
+        ax.set_ylabel("Mean IoU")
+        ax.set_title("Accuracy–Efficiency Frontier\n(bubble size ∝ memory; bold border = Pareto)")
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        img_tag = self._fig_to_img_tag(fig)
+        plt.close(fig)
+        return img_tag
+
+    # ------------------------------------------------------------------
+    # Utilities
+    # ------------------------------------------------------------------
+
+    def _gather_pred_gt(self, result):
+        """Concatenate predictions and GTs across all sequences in a result."""
+        pred_list, gt_list = [], []
+        for r in result.sequence_results:
+            if r.predictions is not None and r.ground_truths is not None:
+                pred_list.append(r.predictions)
+                gt_list.append(r.ground_truths)
+        if not pred_list:
+            return None, None
+        return np.concatenate(pred_list), np.concatenate(gt_list)
+
+    def _fig_to_img_tag(self, fig) -> str:
+        """Encode a matplotlib figure as a base64 PNG <img> tag."""
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", bbox_inches="tight")
+        buf.seek(0)
+        b64 = base64.b64encode(buf.read()).decode("ascii")
+        return f'<img src="data:image/png;base64,{b64}" alt="chart" class="chart-img">'
+
+    # ------------------------------------------------------------------
+    # CSS
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _css() -> str:
+        return """
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    background: #f8f9fa;
+    color: #212529;
+}
+.container { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
+header { margin-bottom: 32px; border-bottom: 2px solid #dee2e6; padding-bottom: 16px; }
+header h1 { font-size: 1.75rem; font-weight: 700; color: #1a1a2e; }
+header .meta { color: #6c757d; margin-top: 4px; font-size: 0.875rem; }
+section { margin-bottom: 40px; }
+h2 { font-size: 1.2rem; font-weight: 600; margin-bottom: 16px;
+     padding-bottom: 6px; border-bottom: 1px solid #dee2e6; color: #1a1a2e; }
+h3 { font-size: 1rem; font-weight: 600; margin-bottom: 8px; color: #343a40; }
+table {
+    width: 100%; border-collapse: collapse;
+    background: #fff; border-radius: 6px;
+    overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08);
+}
+thead { background: #1a1a2e; color: #fff; }
+thead th { padding: 10px 14px; text-align: right; font-weight: 600; font-size: 0.8rem; }
+thead th:nth-child(2) { text-align: left; }
+tbody tr:nth-child(even) { background: #f8f9fa; }
+tbody tr:hover { background: #e9ecef; }
+td { padding: 9px 14px; text-align: right; border-bottom: 1px solid #e9ecef; }
+td.name { text-align: left; font-weight: 600; }
+td.pareto { text-align: center; color: #28a745; font-weight: 700; }
+.chart-row { display: flex; gap: 24px; flex-wrap: wrap; }
+.chart { flex: 1; min-width: 280px; background: #fff;
+         border-radius: 6px; padding: 16px;
+         box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.chart-img { max-width: 100%; height: auto; display: block; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #dee2e6;
+         color: #6c757d; font-size: 0.8rem; }
+footer a { color: #495057; }
+"""
