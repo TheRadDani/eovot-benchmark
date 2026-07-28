@@ -303,8 +303,8 @@ class DifficultyReport:
         return self.entries[:n]
 
     def easiest(self, n: int = 10) -> List[SequenceDifficultyEntry]:
-        """Return the *n* easiest sequences (lowest difficulty score)."""
-        return self.entries[-n:]
+        """Return the *n* easiest sequences (lowest difficulty score), easiest first."""
+        return list(reversed(self.entries[-n:]))
 
     def to_markdown(self) -> str:
         """Render the ranked difficulty table as a Markdown string."""
