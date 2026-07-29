@@ -1,5 +1,11 @@
+from .html_report import HTMLReportGenerator
+from .html_reporter import HTMLReporter
 from .reporter import BenchmarkReporter
 from .visualizer import BenchmarkVisualizer
-from .html_reporter import HTMLReporter
 
-__all__ = ["BenchmarkReporter", "BenchmarkVisualizer", "HTMLReporter"]
+__all__ = [
+    "HTMLReportGenerator",
+    "HTMLReporter",
+    "BenchmarkReporter",
+    "BenchmarkVisualizer",
+]
