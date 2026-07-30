@@ -183,3 +183,87 @@ class TestComputeAll:
         assert result_small.precision_auc == pytest.approx(
             result_large.precision_auc, rel=0.05
         )
+
+
+# ---------------------------------------------------------------------------
+# BenchmarkResult integration
+# ---------------------------------------------------------------------------
+
+class TestBenchmarkResultNPAUC:
+    """Aggregate + serialization integration for mean_normalized_precision_auc."""
+
+    def _make_result(self, npauc_values):
+        from eovot.benchmark.engine import BenchmarkResult, SequenceResult
+        from eovot.profiling.profiler import ProfilingResult
+
+        result = BenchmarkResult(tracker_name="T", dataset_name="D")
+        for i, npauc in enumerate(npauc_values):
+            pr = ProfilingResult(
+                tracker_name="T", frame_count=30, fps=100.0, latency_mean_ms=10.0,
+                latency_std_ms=1.0, latency_p95_ms=12.0, peak_memory_mb=50.0,
+            )
+            am = AccuracyMetrics(
+                mean_iou=0.5, success_auc=0.5, precision_auc=0.5,
+                normalized_precision_auc=npauc,
+            )
+            result.sequence_results.append(
+                SequenceResult(
+                    sequence_name=f"s{i}",
+                    ious=np.array([0.5] * 30),
+                    profiling=pr,
+                    accuracy_metrics=am,
+                )
+            )
+        return result
+
+    def test_mean_npauc_correct(self):
+        result = self._make_result([0.2, 0.4, 0.6, 0.8])
+        assert result.mean_normalized_precision_auc == pytest.approx(0.5, rel=1e-5)
+
+    def test_mean_npauc_none_when_no_accuracy_metrics(self):
+        from eovot.benchmark.engine import BenchmarkResult, SequenceResult
+        from eovot.profiling.profiler import ProfilingResult
+
+        result = BenchmarkResult(tracker_name="T", dataset_name="D")
+        pr = ProfilingResult(
+            tracker_name="T", frame_count=10, fps=50.0, latency_mean_ms=20.0,
+            latency_std_ms=1.0, latency_p95_ms=22.0, peak_memory_mb=10.0,
+        )
+        result.sequence_results.append(
+            SequenceResult(
+                sequence_name="s0", ious=np.array([0.5] * 10), profiling=pr,
+                accuracy_metrics=None,
+            )
+        )
+        assert result.mean_normalized_precision_auc is None
+
+    def test_summary_exposes_npauc(self):
+        result = self._make_result([0.3, 0.5])
+        s = result.summary()
+        assert "normalized_precision_auc" in s
+        assert s["normalized_precision_auc"] == pytest.approx(0.4, abs=0.001)
+
+    def test_to_dict_per_sequence_key(self):
+        result = self._make_result([0.6, 0.8])
+        d = result.to_dict()
+        for seq in d["sequences"]:
+            assert "normalized_precision_auc" in seq
+
+    def test_to_dict_summary_roundtrip(self):
+        result = self._make_result([0.35, 0.65])
+        d = result.to_dict()
+        # The summary dict should carry the aggregate
+        assert "normalized_precision_auc" in d["summary"]
+        assert d["summary"]["normalized_precision_auc"] == pytest.approx(0.5, abs=0.001)
+
+    def test_end_to_end_pipeline(self):
+        from eovot.benchmark.engine import BenchmarkEngine
+        from eovot.datasets.synthetic import SyntheticDataset
+        from eovot.trackers.mosse import MOSSETracker
+
+        dataset = SyntheticDataset(num_sequences=3, num_frames=25, motion="linear")
+        result = BenchmarkEngine(verbose=False).run(MOSSETracker(), dataset, dataset_name="Syn")
+        assert result.mean_normalized_precision_auc is not None
+        assert 0.0 <= result.mean_normalized_precision_auc <= 1.0 + 1e-9
+        for sr in result.sequence_results:
+            assert sr.normalized_precision_auc is not None

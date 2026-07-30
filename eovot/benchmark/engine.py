@@ -46,6 +46,11 @@ class SequenceResult:
         """Normalised AUC of the precision curve, or None if not computed."""
         return self.accuracy_metrics.precision_auc if self.accuracy_metrics else None
 
+    @property
+    def normalized_precision_auc(self) -> Optional[float]:
+        """AUC of the normalized precision curve (GOT-10k), or None if not computed."""
+        return self.accuracy_metrics.normalized_precision_auc if self.accuracy_metrics else None
+
 
 @dataclass
 class BenchmarkResult:
