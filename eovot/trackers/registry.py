@@ -26,6 +26,7 @@ from .base import BaseTracker
 from .camshift import CamShiftTracker
 from .csrt import CSRTTracker
 from .kcf import KCFTracker
+from .lk_flow import LKFlowTracker
 from .median_flow import MedianFlowTracker
 from .mil import MILTracker
 from .mosse import MOSSETracker
@@ -39,6 +40,7 @@ TRACKER_REGISTRY: Dict[str, Type[BaseTracker]] = {
     "MIL": MILTracker,
     "MedianFlow": MedianFlowTracker,
     "CamShift": CamShiftTracker,
+    "LKFlow": LKFlowTracker,
 }
 
 # DaSiamRPN / NanoTracker need pre-trained ONNX files the user supplies
