@@ -192,6 +192,9 @@ class ExperimentRunner:
             miou = float(s.get("mean_iou", 0.0))
             sauc = float(s.get("success_auc", miou))   # fall back to mIoU
             pauc = float(s.get("precision_auc", 0.0))
+            sr50 = s.get("success_rate_50")
+            sr75 = s.get("success_rate_75")
+            np_auc = s.get("normalized_precision_auc")
             rows.append(
                 {
                     "tracker": s.get("tracker", "?"),
@@ -199,6 +202,9 @@ class ExperimentRunner:
                     "mIoU": miou,
                     "success_auc": sauc,
                     "precision_auc": pauc,
+                    "sr50": float(sr50) if sr50 is not None else None,
+                    "sr75": float(sr75) if sr75 is not None else None,
+                    "np_auc": float(np_auc) if np_auc is not None else None,
                     "fps": float(s.get("mean_fps", 0.0)),
                     "mem_mb": float(s.get("peak_memory_mb", 0.0)),
                     "n_seq": int(s.get("num_sequences", 0)),
@@ -207,18 +213,38 @@ class ExperimentRunner:
 
         rows.sort(key=lambda x: x["success_auc"], reverse=True)
 
-        lines = [
-            "# EOVOT Experiment Leaderboard\n",
-            "| Rank | Tracker | Dataset | mIoU | Success AUC | Precision AUC | FPS | Mem (MB) | Sequences |",
-            "|------|---------|---------|-----:|------------:|--------------:|----:|---------:|----------:|",
-        ]
-        for rank, row in enumerate(rows, start=1):
-            lines.append(
-                f"| {rank} | {row['tracker']} | {row['dataset']} "
-                f"| {row['mIoU']:.4f} | {row['success_auc']:.4f} "
-                f"| {row['precision_auc']:.4f} | {row['fps']:.1f} "
-                f"| {row['mem_mb']:.1f} | {row['n_seq']} |"
-            )
+        has_got10k = any(r["sr50"] is not None for r in rows)
+
+        if has_got10k:
+            lines = [
+                "# EOVOT Experiment Leaderboard\n",
+                "| Rank | Tracker | Dataset | mIoU | Success AUC | SR@0.5 | SR@0.75 | NP AUC | Precision AUC | FPS | Mem (MB) | Sequences |",
+                "|------|---------|---------|-----:|------------:|-------:|--------:|-------:|--------------:|----:|---------:|----------:|",
+            ]
+            for rank, row in enumerate(rows, start=1):
+                sr50_s = f"{row['sr50']:.4f}" if row["sr50"] is not None else "—"
+                sr75_s = f"{row['sr75']:.4f}" if row["sr75"] is not None else "—"
+                np_s = f"{row['np_auc']:.4f}" if row["np_auc"] is not None else "—"
+                lines.append(
+                    f"| {rank} | {row['tracker']} | {row['dataset']} "
+                    f"| {row['mIoU']:.4f} | {row['success_auc']:.4f} "
+                    f"| {sr50_s} | {sr75_s} | {np_s} "
+                    f"| {row['precision_auc']:.4f} | {row['fps']:.1f} "
+                    f"| {row['mem_mb']:.1f} | {row['n_seq']} |"
+                )
+        else:
+            lines = [
+                "# EOVOT Experiment Leaderboard\n",
+                "| Rank | Tracker | Dataset | mIoU | Success AUC | Precision AUC | FPS | Mem (MB) | Sequences |",
+                "|------|---------|---------|-----:|------------:|--------------:|----:|---------:|----------:|",
+            ]
+            for rank, row in enumerate(rows, start=1):
+                lines.append(
+                    f"| {rank} | {row['tracker']} | {row['dataset']} "
+                    f"| {row['mIoU']:.4f} | {row['success_auc']:.4f} "
+                    f"| {row['precision_auc']:.4f} | {row['fps']:.1f} "
+                    f"| {row['mem_mb']:.1f} | {row['n_seq']} |"
+                )
         lines.append("")
         return "\n".join(lines)
 

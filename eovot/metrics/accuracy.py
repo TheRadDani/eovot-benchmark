@@ -1,6 +1,6 @@
 """Accuracy metrics for visual object tracking.
 
-Implements the standard VOT evaluation protocol used by OTB, GOT-10k, and
+Implements the standard VOT evaluation protocols used by OTB, GOT-10k, and
 LaSOT benchmarks:
 
 - **IoU** (Intersection over Union) per frame
@@ -9,6 +9,11 @@ LaSOT benchmarks:
 - **Precision Curve** — fraction of frames whose predicted centre is
   within a pixel-distance threshold of the ground-truth centre,
   swept from 0 to 50 px; AUC at 20 px is the canonical scalar.
+- **SR@0.5 / SR@0.75** — Success Rate at fixed IoU thresholds (GOT-10k
+  primary metrics alongside Average Overlap).
+- **Normalized Precision** — centre-distance normalized by sqrt(GT area),
+  threshold swept 0 → 0.5; scale-invariant and required for LaSOT / GOT-10k
+  NP AUC computation.
 - **AccuracyMetrics** dataclass that bundles all scalars together.
 """
 
@@ -68,10 +73,25 @@ def center_distance(pred: BBox, gt: BBox) -> float:
 
 @dataclass
 class AccuracyMetrics:
-    """Scalar accuracy summary for a tracker on a dataset or sequence."""
+    """Scalar accuracy summary for a tracker on a dataset or sequence.
+
+    Standard metrics (OTB / GOT-10k / LaSOT protocols):
+
+    * ``mean_iou`` — Average Overlap (AO), the GOT-10k primary scalar.
+    * ``success_auc`` — AUC of the overlap success curve (0 → 1 threshold).
+    * ``precision_auc`` — Normalised AUC of the centre-distance precision
+      curve (0 → 50 px threshold); OTB-protocol.
+    * ``success_rate_50`` — SR@0.5: fraction of frames with IoU > 0.5.
+      First GOT-10k secondary metric.
+    * ``success_rate_75`` — SR@0.75: fraction of frames with IoU > 0.75.
+      Second GOT-10k secondary metric (stricter).
+    * ``normalized_precision_auc`` — NP AUC: precision curve with distances
+      normalised by sqrt(GT area), threshold 0 → 0.5; LaSOT / GOT-10k
+      scale-invariant precision.
+    """
 
     mean_iou: float
-    """Mean IoU across all evaluated frames."""
+    """Mean IoU across all evaluated frames (= Average Overlap / AO)."""
 
     success_auc: float
     """Area Under the Success Curve (IoU thresholds 0 → 1)."""
@@ -79,11 +99,24 @@ class AccuracyMetrics:
     precision_auc: float
     """Normalised AUC of the Precision Curve (distance thresholds 0 → 50 px)."""
 
+    success_rate_50: float = 0.0
+    """SR@0.5 — fraction of frames where IoU > 0.5 (GOT-10k metric)."""
+
+    success_rate_75: float = 0.0
+    """SR@0.75 — fraction of frames where IoU > 0.75 (GOT-10k strict metric)."""
+
+    normalized_precision_auc: float = 0.0
+    """NP AUC — precision with distance normalised by sqrt(GT area),
+    thresholds 0 → 0.5 (LaSOT / GOT-10k protocol)."""
+
     def __str__(self) -> str:
         return (
             f"AccuracyMetrics("
-            f"mIoU={self.mean_iou:.4f}, "
+            f"AO={self.mean_iou:.4f}, "
             f"success_AUC={self.success_auc:.4f}, "
+            f"SR@0.5={self.success_rate_50:.4f}, "
+            f"SR@0.75={self.success_rate_75:.4f}, "
+            f"NP_AUC={self.normalized_precision_auc:.4f}, "
             f"precision_AUC={self.precision_auc:.4f})"
         )
 
@@ -152,6 +185,40 @@ class MetricsEngine:
         gc = g[:, :2] + g[:, 2:] / 2.0   # GT centres (N, 2)
         return np.sqrt(np.sum((pc - gc) ** 2, axis=1))
 
+    def batch_normalized_center_distance(
+        self, preds: np.ndarray, gts: np.ndarray
+    ) -> np.ndarray:
+        """Per-frame centre distance normalised by the square root of GT box area.
+
+        This is the **Normalized Precision (NP)** distance used by GOT-10k and
+        LaSOT to make precision evaluation scale-invariant: a 20 px error is
+        severe for a 40×40 target but negligible for a 400×400 one.
+
+        Formula::
+
+            norm_dist_t = ||centre_pred_t - centre_gt_t|| / sqrt(w_gt_t × h_gt_t)
+
+        Frames where the GT box has zero area are assigned distance ``0.0``.
+
+        Args:
+            preds: ``(N, 4)`` array of predicted boxes ``(x, y, w, h)``.
+            gts:   ``(N, 4)`` array of ground-truth boxes ``(x, y, w, h)``.
+
+        Returns:
+            ``(N,)`` float64 array of normalised distances (dimensionless).
+        """
+        n = min(len(preds), len(gts))
+        if n == 0:
+            return np.empty(0, dtype=np.float64)
+        p = np.asarray(preds[:n], dtype=np.float64)
+        g = np.asarray(gts[:n], dtype=np.float64)
+        pc = p[:, :2] + p[:, 2:] / 2.0
+        gc = g[:, :2] + g[:, 2:] / 2.0
+        pixel_dists = np.sqrt(np.sum((pc - gc) ** 2, axis=1))
+        gt_area = g[:, 2] * g[:, 3]
+        gt_sqrt_area = np.where(gt_area > 0, np.sqrt(gt_area), 1.0)
+        return pixel_dists / gt_sqrt_area
+
     def success_curve(
         self,
         ious: np.ndarray,
@@ -196,12 +263,51 @@ class MetricsEngine:
         rates = np.array([(dists < t).mean() for t in thresholds])
         return thresholds, rates
 
+    def normalized_precision_curve(
+        self,
+        preds: np.ndarray,
+        gts: np.ndarray,
+        thresholds: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Normalized Precision (NP) curve used by GOT-10k and LaSOT.
+
+        Sweeps a normalised-distance threshold from 0 to 0.5 and reports the
+        fraction of frames where the normalised centre-distance is below each
+        threshold.  Normalisation by ``sqrt(GT area)`` makes the metric
+        scale-invariant — a 20 px error weighs more for a small target than
+        for a large one.
+
+        The GOT-10k NP AUC is computed by trapezoidal integration of this
+        curve over ``[0, 0.5]`` and dividing by 0.5 (so values live in
+        ``[0, 1]`` regardless of the threshold range).
+
+        Args:
+            preds:      ``(N, 4)`` predicted boxes ``(x, y, w, h)``.
+            gts:        ``(N, 4)`` ground-truth boxes ``(x, y, w, h)``.
+            thresholds: Normalised thresholds to sweep (default: 0 … 0.5,
+                        51 evenly-spaced points).
+
+        Returns:
+            ``(thresholds, precision_rates)`` — both shape ``(T,)``.
+        """
+        if thresholds is None:
+            thresholds = np.linspace(0.0, 0.5, 51)
+        norm_dists = self.batch_normalized_center_distance(preds, gts)
+        if len(norm_dists) == 0:
+            return thresholds, np.zeros_like(thresholds)
+        rates = np.array([(norm_dists < t).mean() for t in thresholds])
+        return thresholds, rates
+
     def compute_all(
         self,
         preds: np.ndarray,
         gts: np.ndarray,
     ) -> AccuracyMetrics:
-        """Compute mean IoU, success AUC, and precision AUC in one call.
+        """Compute all accuracy metrics in one call.
+
+        Covers the full OTB + GOT-10k + LaSOT metric suite:
+        mean IoU (AO), success AUC, precision AUC, SR@0.5, SR@0.75, and
+        Normalized Precision AUC.
 
         Args:
             preds: ``(N, 4)`` predicted boxes.
@@ -213,20 +319,30 @@ class MetricsEngine:
         ious = self.batch_iou(preds, gts)
 
         # np.trapezoid was introduced in NumPy 2.0; np.trapz was removed in 2.0.
-        _trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz  # type: ignore[attr-defined]
-
-        thr_iou, sr = self.success_curve(ious)
         try:
             _trapz = np.trapezoid  # numpy ≥ 2.0
         except AttributeError:
             _trapz = np.trapz  # numpy < 2.0
+
+        thr_iou, sr = self.success_curve(ious)
         success_auc = float(_trapz(sr, thr_iou))
 
         thr_dist, pr = self.precision_curve(preds, gts)
         prec_auc = float(_trapz(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
 
+        # GOT-10k fixed-threshold success rates
+        sr_50 = float((ious > 0.5).mean()) if len(ious) > 0 else 0.0
+        sr_75 = float((ious > 0.75).mean()) if len(ious) > 0 else 0.0
+
+        # Normalized Precision AUC (GOT-10k / LaSOT protocol)
+        thr_np, np_rates = self.normalized_precision_curve(preds, gts)
+        np_auc = float(_trapz(np_rates, thr_np) / thr_np[-1]) if thr_np[-1] > 0 else 0.0
+
         return AccuracyMetrics(
-            mean_iou=float(ious.mean()),
+            mean_iou=float(ious.mean()) if len(ious) > 0 else 0.0,
             success_auc=success_auc,
             precision_auc=prec_auc,
+            success_rate_50=sr_50,
+            success_rate_75=sr_75,
+            normalized_precision_auc=np_auc,
         )
