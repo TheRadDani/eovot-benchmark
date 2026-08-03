@@ -1,0 +1,55 @@
+# Resolution-scale accuracy–speed tradeoff experiment
+# ----------------------------------------------------
+# Sweeps a tracker at multiple frame resolutions to find the optimal
+# scale factor for a given accuracy-vs-throughput budget.
+#
+# Usage:
+#   python scripts/analyze_resolution.py \
+#       --config configs/experiments/resolution_analysis.yaml
+#
+# Or call ResolutionScaleAnalyzer directly in Python:
+#   from eovot.analysis.resolution_analysis import ResolutionScaleAnalyzer
+#   from eovot.benchmark.engine import BenchmarkEngine
+#   from eovot.trackers.kcf import KCFTracker
+#   from eovot.datasets.synthetic import SyntheticDataset
+#
+#   engine   = BenchmarkEngine(verbose=True)
+#   analyzer = ResolutionScaleAnalyzer(engine)
+#   result   = analyzer.analyze(
+#       KCFTracker(),
+#       SyntheticDataset(num_sequences=10),
+#       dataset_name="Synthetic",
+#       scale_factors=[1.0, 0.75, 0.5, 0.25],
+#   )
+#   print(result.to_markdown_table())
+
+experiment:
+  name: "resolution-analysis"
+  seed: 42
+  tdp_watts: null            # set to device TDP (W) to enable energy profiling
+
+dataset:
+  loader: SyntheticDataset   # OTBDataset | GOT10kDataset | LaSOTDataset | SyntheticDataset
+  name: "Synthetic"
+  # For SyntheticDataset — no root path required:
+  num_sequences: 10
+  num_frames: 150
+  frame_size: [640, 480]     # [width, height] of generated frames
+  bbox_size: [60, 60]        # [width, height] of the tracked rectangle
+  motion: "linear"           # linear | circular | random
+  seed: 42
+  # For real datasets, set loader and root instead:
+  # root: /data/OTB100
+  # max_sequences: null
+
+tracker:
+  name: "KCF"
+  params: {}
+
+resolution_analysis:
+  scale_factors: [1.0, 0.75, 0.5, 0.25]
+  # min_iou_budget: 0.05     # optional: report optimal scale within 5% IoU drop
+  max_sequences: null        # set to int to limit evaluation per scale
+
+benchmark:
+  verbose: true
