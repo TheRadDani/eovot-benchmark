@@ -288,3 +288,187 @@ def plot_tracker_comparison(
         print(f"[plot] Tracker comparison saved → {output_path}")
     else:
         plt.show()
+
+
+def plot_fps_iou_scatter(
+    results: List[Dict[str, Any]],
+    output_path: Optional[str] = None,
+    title: str = "FPS vs Accuracy (Edge Deployment View)",
+    annotate: bool = True,
+    pareto_front: bool = True,
+) -> None:
+    """Scatter plot of mean FPS vs mean IoU — the primary edge-deployment view.
+
+    Each point represents one tracker/dataset combination.  Trackers closer to
+    the top-right corner are better suited for edge deployment (high accuracy AND
+    high throughput).  The Pareto front (if enabled) highlights the trackers
+    where no other point dominates both dimensions simultaneously.
+
+    Args:
+        results:      List of dicts from
+            :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
+        output_path:  Save path (PNG/PDF/SVG).  Interactive display when ``None``.
+        title:        Figure title.
+        annotate:     Label each point with the tracker name.
+        pareto_front: Draw the Pareto-optimal boundary as a step curve.
+
+    Example::
+
+        import json
+        with open("results/MOSSE-OTB100.json") as f:
+            mosse = json.load(f)
+        with open("results/KCF-OTB100.json") as f:
+            kcf = json.load(f)
+        plot_fps_iou_scatter([mosse, kcf], output_path="scatter.png")
+    """
+    plt = _get_matplotlib()
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    points = []
+    for i, result in enumerate(results):
+        s = result.get("summary", {})
+        name = s.get("tracker") or s.get("tracker_name", f"tracker_{i}")
+        fps = float(s.get("mean_fps", 0.0))
+        iou = float(s.get("mean_iou", 0.0))
+        if fps > 0 and iou > 0:
+            points.append((name, fps, iou))
+
+    if not points:
+        ax.text(0.5, 0.5, "No data to plot.", ha="center", va="center",
+                transform=ax.transAxes, fontsize=12)
+        if output_path:
+            fig.savefig(output_path, dpi=150, bbox_inches="tight")
+            plt.close(fig)
+        else:
+            plt.show()
+        return
+
+    names, fps_vals, iou_vals = zip(*points)
+    fps_arr = np.array(fps_vals)
+    iou_arr = np.array(iou_vals)
+
+    ax.scatter(fps_arr, iou_arr, s=80, zorder=5)
+    if annotate:
+        for name, fps, iou in zip(names, fps_arr, iou_arr):
+            ax.annotate(
+                name,
+                xy=(fps, iou),
+                xytext=(4, 4),
+                textcoords="offset points",
+                fontsize=9,
+            )
+
+    if pareto_front and len(points) > 1:
+        # Build Pareto front: sort by FPS desc, keep points with increasing IoU.
+        sorted_pts = sorted(zip(fps_arr, iou_arr), reverse=True)
+        pf_fps, pf_iou = [sorted_pts[0][0]], [sorted_pts[0][1]]
+        best_iou = sorted_pts[0][1]
+        for f, iou in sorted_pts[1:]:
+            if iou >= best_iou:
+                pf_fps.append(f)
+                pf_iou.append(iou)
+                best_iou = iou
+        # Draw as a step curve connecting Pareto points.
+        ax.step(
+            sorted(pf_fps, reverse=True),
+            [y for _, y in sorted(zip(pf_fps, pf_iou), reverse=True)],
+            where="post",
+            linestyle="--",
+            color="gray",
+            linewidth=1.5,
+            label="Pareto front",
+            zorder=4,
+        )
+        ax.legend(fontsize=10)
+
+    ax.set_xlabel("Mean FPS", fontsize=12)
+    ax.set_ylabel("Mean IoU", fontsize=12)
+    ax.set_title(title, fontsize=14)
+    ax.set_xlim(left=0)
+    ax.set_ylim(0.0, 1.0)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+
+    if output_path:
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"[plot] FPS-IoU scatter saved → {output_path}")
+    else:
+        plt.show()
+
+
+def plot_latency_percentiles(
+    results: List[Dict[str, Any]],
+    output_path: Optional[str] = None,
+    title: str = "Latency Percentile Comparison",
+) -> None:
+    """Grouped bar chart comparing p50/p95/p99 latencies across trackers.
+
+    Latency percentiles reveal the *tail* behaviour that average latency hides.
+    A tracker may have a low mean but high p99 (latency spikes), making it
+    unsuitable for real-time edge deployment with strict SLA budgets.
+
+    The p50/p95 data is read from the ``"mean_latency_ms"`` and per-sequence
+    summary dicts; p99 is included when the result was produced by a
+    :class:`~eovot.profiling.profiler.Profiler` version that computes it.
+
+    Args:
+        results:     List of dicts from
+            :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
+        output_path: Save path.  Interactive display when ``None``.
+        title:       Figure title.
+
+    Example::
+
+        plot_latency_percentiles([mosse_result, kcf_result],
+                                 output_path="latency_p99.png")
+    """
+    plt = _get_matplotlib()
+
+    tracker_names: List[str] = []
+    p50_vals: List[float] = []
+    p95_vals: List[float] = []
+    p99_vals: List[float] = []
+
+    for result in results:
+        s = result.get("summary", {})
+        name = s.get("tracker") or s.get("tracker_name", "?")
+        seqs = result.get("sequences", [])
+
+        latencies = [float(seq.get("mean_latency_ms", 0.0)) for seq in seqs if "mean_latency_ms" in seq]
+        if not latencies:
+            continue
+
+        arr = np.array(latencies)
+        tracker_names.append(name)
+        p50_vals.append(float(np.percentile(arr, 50)))
+        p95_vals.append(float(np.percentile(arr, 95)))
+        # p99 across sequence means is an approximation; use it for comparison.
+        p99_vals.append(float(np.percentile(arr, 99)))
+
+    if not tracker_names:
+        return
+
+    x = np.arange(len(tracker_names))
+    bar_width = 0.25
+
+    fig, ax = plt.subplots(figsize=(max(6, len(tracker_names) * 1.5 + 2), 5))
+    ax.bar(x - bar_width, p50_vals, bar_width, label="p50 (median)", alpha=0.85)
+    ax.bar(x, p95_vals, bar_width, label="p95", alpha=0.85)
+    ax.bar(x + bar_width, p99_vals, bar_width, label="p99 (tail)", alpha=0.85)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(tracker_names, fontsize=11)
+    ax.set_ylabel("Latency (ms)", fontsize=12)
+    ax.set_title(title, fontsize=14)
+    ax.legend(fontsize=10)
+    ax.grid(True, axis="y", alpha=0.3)
+    fig.tight_layout()
+
+    if output_path:
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"[plot] Latency percentile chart saved → {output_path}")
+    else:
+        plt.show()
