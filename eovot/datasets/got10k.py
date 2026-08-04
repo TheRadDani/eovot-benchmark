@@ -15,7 +15,7 @@ Dataset directory layout::
     │   │   │   └── ...
     │   │   ├── groundtruth.txt            # x,y,w,h — one box per line
     │   │   ├── absence.label              # 0/1 per frame (optional)
-    │   │   └── meta_info.ini
+    │   │   └── meta_info.ini              # object class, motion patterns
     │   └── ...
     ├── val/
     └── test/
@@ -27,12 +27,78 @@ Reference:
 
 from __future__ import annotations
 
+import configparser
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Sequence as TypingSequence
 
 import numpy as np
 
 from .base import BaseDataset, BBox, Sequence
+
+
+@dataclass
+class GOT10kSequenceMeta:
+    """Metadata parsed from a GOT-10k ``meta_info.ini`` file.
+
+    All fields are optional at the file level; missing keys are stored as
+    empty strings so callers can always read attributes without guarding.
+
+    Attributes:
+        name:             Sequence folder name (e.g. ``"GOT-10k_Val_000001"``).
+        object_class:     Fine-grained object class (e.g. ``"dog"``).
+        motion_class:     Motion rigidity — ``"rigid"`` or ``"non-rigid"``.
+        major_class:      Coarser semantic grouping (e.g. ``"animal"``).
+        root_class:       Broadest semantic root (e.g. ``"GOT-10k"`` root node).
+        motion_adverb:    Motion manner (e.g. ``"quickly"``, ``"slowly"``).
+    """
+
+    name: str
+    object_class: str = ""
+    motion_class: str = ""
+    major_class: str = ""
+    root_class: str = ""
+    motion_adverb: str = ""
+
+    def __str__(self) -> str:
+        return (
+            f"GOT10kSequenceMeta[{self.name}] "
+            f"class={self.object_class!r}  motion={self.motion_class!r}"
+        )
+
+
+def _parse_meta_info(ini_path: Path, seq_name: str) -> GOT10kSequenceMeta:
+    """Parse a GOT-10k ``meta_info.ini`` file into :class:`GOT10kSequenceMeta`.
+
+    Uses :mod:`configparser` with ``[DEFAULT]`` section; fields absent from
+    the file default to empty strings so callers never see KeyError.
+
+    Args:
+        ini_path: Path to ``meta_info.ini`` inside a sequence directory.
+        seq_name: Sequence name embedded in the returned dataclass.
+
+    Returns:
+        Populated :class:`GOT10kSequenceMeta` instance.
+    """
+    cfg = configparser.ConfigParser()
+    cfg.read(str(ini_path), encoding="utf-8")
+    # GOT-10k stores everything under [DEFAULT]; configparser reads it via
+    # cfg.defaults() or cfg['DEFAULT'].  We use .get with a fallback.
+    def _get(key: str) -> str:
+        val = cfg.defaults().get(key, "").strip()
+        # Also check a bare [DEFAULT] section explicitly written as such.
+        if not val and cfg.has_section("DEFAULT"):  # pragma: no cover
+            val = cfg.get("DEFAULT", key, fallback="").strip()
+        return val
+
+    return GOT10kSequenceMeta(
+        name=seq_name,
+        object_class=_get("object_class_name"),
+        motion_class=_get("motion_class"),
+        major_class=_get("major_class"),
+        root_class=_get("root_class"),
+        motion_adverb=_get("motion_adverb"),
+    )
 
 
 class GOT10kDataset(BaseDataset):
@@ -53,6 +119,17 @@ class GOT10kDataset(BaseDataset):
         max_sequences: Optional upper limit on the number of sequences
             returned.  Useful for quick smoke tests without downloading
             the full dataset.
+
+    Example::
+
+        dataset = GOT10kDataset("/data/GOT-10k", split="val")
+        print(len(dataset))
+        seq = dataset[0]
+        print(seq.name, len(seq))
+
+        # Filter to a single object category:
+        dogs = dataset.filter_by_category("dog")
+        print(len(dogs), "dog sequences")
     """
 
     SPLITS = ("train", "val", "test")
@@ -70,6 +147,8 @@ class GOT10kDataset(BaseDataset):
         self.max_sequences = max_sequences
         self._split_dir = Path(root) / split
         self._seq_names: Optional[List[str]] = None
+        # Cache for sequence metadata, populated lazily.
+        self._meta_cache: Dict[str, GOT10kSequenceMeta] = {}
 
     # ------------------------------------------------------------------
     # BaseDataset interface
@@ -83,6 +162,43 @@ class GOT10kDataset(BaseDataset):
         if idx < 0 or idx >= len(names):
             raise IndexError(f"Sequence index {idx} out of range [0, {len(names)})")
         return self.load_sequence(names[idx])
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
+    @property
+    def name(self) -> str:
+        return f"GOT-10k-{self.split}"
+
+    @property
+    def categories(self) -> List[str]:
+        """Sorted list of unique object-class names present in this split.
+
+        Reads ``meta_info.ini`` for every sequence in
+        :meth:`list_sequences` and extracts the ``object_class_name`` field.
+        Sequences whose ``meta_info.ini`` is missing or whose class name is
+        empty are skipped.
+
+        Returns:
+            Sorted list of unique class-name strings (e.g.
+            ``["airplane", "dog", "person"]``).
+
+        Example::
+
+            dataset = GOT10kDataset("/data/GOT-10k", split="val")
+            print(dataset.categories[:5])
+        """
+        seen = set()
+        for seq_name in self.list_sequences():
+            meta = self.sequence_meta(seq_name)
+            if meta.object_class:
+                seen.add(meta.object_class)
+        return sorted(seen)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def list_sequences(self) -> List[str]:
         """Return the list of sequence names for this split.
@@ -108,6 +224,71 @@ class GOT10kDataset(BaseDataset):
             names = names[: self.max_sequences]
         self._seq_names = names
         return self._seq_names
+
+    def sequence_meta(self, seq_name: str) -> GOT10kSequenceMeta:
+        """Return :class:`GOT10kSequenceMeta` for a single sequence.
+
+        Parses ``meta_info.ini`` inside the sequence directory (if present)
+        and caches the result so repeated calls are free.  When the file
+        does not exist all metadata fields are returned as empty strings.
+
+        Args:
+            seq_name: Sequence folder name (e.g. ``"GOT-10k_Val_000001"``).
+
+        Returns:
+            :class:`GOT10kSequenceMeta` with fields from ``meta_info.ini``.
+        """
+        if seq_name in self._meta_cache:
+            return self._meta_cache[seq_name]
+
+        ini_path = self._split_dir / seq_name / "meta_info.ini"
+        if ini_path.is_file():
+            meta = _parse_meta_info(ini_path, seq_name)
+        else:
+            meta = GOT10kSequenceMeta(name=seq_name)
+        self._meta_cache[seq_name] = meta
+        return meta
+
+    def filter_by_category(self, *classes: str) -> "GOT10kDataset":
+        """Return a new :class:`GOT10kDataset` view restricted to *classes*.
+
+        Iterates over :meth:`list_sequences`, reads each sequence's
+        ``meta_info.ini`` to determine its object class, and keeps only
+        sequences matching one of the requested class names.  The returned
+        dataset shares the same ``root`` and ``split`` but has an independent
+        (pre-filtered) sequence list.
+
+        Args:
+            *classes: One or more object-class names to keep
+                (e.g. ``"dog"``  or ``"airplane", "car"``).
+
+        Returns:
+            A new :class:`GOT10kDataset` instance whose
+            :meth:`list_sequences` returns only matching sequences.
+
+        Raises:
+            ValueError: If *classes* is empty.
+
+        Example::
+
+            dataset = GOT10kDataset("/data/GOT-10k", split="val")
+            animals = dataset.filter_by_category("dog", "cat", "horse")
+            print(len(animals), "animal sequences")
+        """
+        if not classes:
+            raise ValueError("filter_by_category() requires at least one class name.")
+        target = set(classes)
+        filtered = [
+            seq_name
+            for seq_name in self.list_sequences()
+            if self.sequence_meta(seq_name).object_class in target
+        ]
+        view = GOT10kDataset(root=self.root, split=self.split, max_sequences=None)
+        # Bypass normal discovery by pre-loading the filtered list.
+        view._seq_names = filtered
+        # Share the metadata cache to avoid redundant ini parses.
+        view._meta_cache = self._meta_cache
+        return view
 
     def load_sequence(self, seq_name: str) -> Sequence:
         """Load a single GOT-10k sequence by name.
@@ -158,9 +339,9 @@ class GOT10kDataset(BaseDataset):
             ground_truth=np.array(gt_boxes, dtype=np.float64),
         )
 
-    @property
-    def name(self) -> str:
-        return f"GOT-10k-{self.split}"
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _load_groundtruth(gt_file: Path) -> List[BBox]:
