@@ -200,6 +200,42 @@ class BenchmarkReporter:
             fh.write("\n")
         return path
 
+    def save_html(
+        self,
+        results: List[Dict[str, Any]],
+        name: str = "report",
+        title: str = "EOVOT Benchmark Report",
+    ) -> Path:
+        """Write a self-contained HTML report to disk.
+
+        The report contains an interactive leaderboard table and inline SVG
+        charts (success curves, precision curves, FPS-IoU scatter, latency
+        percentiles).  No external CDN or matplotlib installation is required.
+
+        Args:
+            results: List of result dicts, one per tracker / dataset.  Each
+                dict must match the format produced by
+                :meth:`~eovot.benchmark.engine.BenchmarkResult.to_dict`.
+            name:  Base filename without extension.  Default: ``"report"``.
+            title: HTML document title shown in the page heading and browser
+                tab.
+
+        Returns:
+            :class:`pathlib.Path` of the written ``.html`` file.
+
+        Example::
+
+            reporter = BenchmarkReporter(output_dir="results/")
+            reporter.save_html([mosse_dict, kcf_dict], name="comparison",
+                               title="Classical Trackers on OTB100")
+        """
+        from .html_report import HTMLReportGenerator
+
+        gen = HTMLReportGenerator(title=title)
+        path = self.output_dir / f"{name}.html"
+        gen.save(results, str(path))
+        return path
+
 
 def _json_default(obj: Any) -> Any:
     """JSON serialisation fallback for non-standard types (e.g. numpy scalars)."""
