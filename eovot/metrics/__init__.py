@@ -4,6 +4,7 @@ from .accuracy import (
     iou,
     center_distance,
     AccuracyMetrics,
+    GOT10kMetrics,
     MetricsEngine,
 )
 from .attributes import (
@@ -28,6 +29,7 @@ __all__ = [
     "iou",
     "center_distance",
     "AccuracyMetrics",
+    "GOT10kMetrics",
     "MetricsEngine",
     "ALL_ATTRIBUTES",
     "ATTRIBUTE_DESCRIPTIONS",
