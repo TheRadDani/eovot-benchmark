@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Union
 import numpy as np
 
 from ..datasets.base import BaseDataset, Sequence
-from ..metrics.accuracy import AccuracyMetrics, MetricsEngine
+from ..metrics.accuracy import AccuracyMetrics, GOT10kMetrics, MetricsEngine
 from ..profiling.energy import EnergyProfiler, EnergyResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
@@ -26,6 +26,7 @@ class SequenceResult:
     center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
     energy: Optional[EnergyResult] = None          # energy estimate; None when TDP not configured
     accuracy_metrics: Optional[AccuracyMetrics] = None  # success AUC, precision AUC
+    got10k_metrics: Optional[GOT10kMetrics] = None  # GOT-10k scalars: AO, SR@0.5/0.75, NP@0.20
 
     @property
     def mean_iou(self) -> float:
@@ -109,6 +110,34 @@ class BenchmarkResult:
                 if r.accuracy_metrics is not None]
         return float(np.mean(aucs)) if aucs else None
 
+    @property
+    def mean_ao(self) -> Optional[float]:
+        """Mean Average Overlap (GOT-10k AO) across all sequences, or ``None``."""
+        vals = [r.got10k_metrics.ao for r in self.sequence_results
+                if r.got10k_metrics is not None]
+        return float(np.mean(vals)) if vals else None
+
+    @property
+    def mean_sr_50(self) -> Optional[float]:
+        """Mean SR@0.5 across all sequences, or ``None`` if not computed."""
+        vals = [r.got10k_metrics.sr_50 for r in self.sequence_results
+                if r.got10k_metrics is not None]
+        return float(np.mean(vals)) if vals else None
+
+    @property
+    def mean_sr_75(self) -> Optional[float]:
+        """Mean SR@0.75 across all sequences, or ``None`` if not computed."""
+        vals = [r.got10k_metrics.sr_75 for r in self.sequence_results
+                if r.got10k_metrics is not None]
+        return float(np.mean(vals)) if vals else None
+
+    @property
+    def mean_normalized_precision(self) -> Optional[float]:
+        """Mean NP@0.20 across all sequences, or ``None`` if not computed."""
+        vals = [r.got10k_metrics.normalized_precision for r in self.sequence_results
+                if r.got10k_metrics is not None]
+        return float(np.mean(vals)) if vals else None
+
     def summary(self) -> Dict:
         d: Dict = {
             "tracker": self.tracker_name,
@@ -127,6 +156,18 @@ class BenchmarkResult:
         pauc = self.mean_precision_auc
         if pauc is not None:
             d["precision_auc"] = round(pauc, 4)
+        ao = self.mean_ao
+        if ao is not None:
+            d["mean_ao"] = round(ao, 4)
+        sr50 = self.mean_sr_50
+        if sr50 is not None:
+            d["mean_sr_50"] = round(sr50, 4)
+        sr75 = self.mean_sr_75
+        if sr75 is not None:
+            d["mean_sr_75"] = round(sr75, 4)
+        mnp = self.mean_normalized_precision
+        if mnp is not None:
+            d["mean_normalized_precision"] = round(mnp, 4)
         e_total = self.total_energy_j
         if e_total is not None:
             d["total_energy_j"] = round(e_total, 4)
@@ -154,6 +195,11 @@ class BenchmarkResult:
             if r.accuracy_metrics is not None:
                 entry["success_auc"] = round(r.accuracy_metrics.success_auc, 4)
                 entry["precision_auc"] = round(r.accuracy_metrics.precision_auc, 4)
+            if r.got10k_metrics is not None:
+                entry["ao"] = round(r.got10k_metrics.ao, 4)
+                entry["sr_50"] = round(r.got10k_metrics.sr_50, 4)
+                entry["sr_75"] = round(r.got10k_metrics.sr_75, 4)
+                entry["normalized_precision"] = round(r.got10k_metrics.normalized_precision, 4)
             if r.energy is not None:
                 entry["energy_j"] = round(r.energy.total_energy_j, 6)
                 entry["energy_per_frame_mj"] = round(r.energy.energy_per_frame_mj, 4)
@@ -240,7 +286,7 @@ class BenchmarkResult:
         """
         from ..profiling.profiler import ProfilingResult
         from ..profiling.energy import EnergyResult
-        from ..metrics.accuracy import AccuracyMetrics
+        from ..metrics.accuracy import AccuracyMetrics, GOT10kMetrics
 
         summary = d["summary"]
         tracker_name: str = summary.get("tracker") or summary.get("tracker_name", "unknown")
@@ -276,6 +322,15 @@ class BenchmarkResult:
                     precision_auc=float(seq.get("precision_auc", 0.0)),
                 )
 
+            got10k: Optional[GOT10kMetrics] = None
+            if "ao" in seq:
+                got10k = GOT10kMetrics(
+                    ao=float(seq["ao"]),
+                    sr_50=float(seq.get("sr_50", 0.0)),
+                    sr_75=float(seq.get("sr_75", 0.0)),
+                    normalized_precision=float(seq.get("normalized_precision", 0.0)),
+                )
+
             energy: Optional[EnergyResult] = None
             if "energy_j" in seq:
                 energy = EnergyResult(
@@ -297,6 +352,7 @@ class BenchmarkResult:
                     center_distances=dists,
                     energy=energy,
                     accuracy_metrics=accuracy,
+                    got10k_metrics=got10k,
                 )
             )
 
@@ -411,6 +467,9 @@ class BenchmarkEngine:
         # Full VOT accuracy metrics: success AUC, precision AUC.
         accuracy = self._metrics.compute_all(preds_eval, gt_eval)
 
+        # GOT-10k protocol: AO, SR@0.5, SR@0.75, NP@0.20.
+        got10k = self._metrics.compute_got10k(preds_eval, gt_eval)
+
         energy: Optional[EnergyResult] = None
         if self._energy_profiler is not None:
             try:
@@ -427,4 +486,5 @@ class BenchmarkEngine:
             center_distances=dists,
             energy=energy,
             accuracy_metrics=accuracy,
+            got10k_metrics=got10k,
         )
