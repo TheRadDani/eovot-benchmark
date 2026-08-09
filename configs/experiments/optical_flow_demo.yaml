@@ -1,0 +1,50 @@
+# Optical-flow tracker demo against a synthetic dataset.
+#
+# Compares OpticalFlowTracker against MOSSE and MedianFlow on a
+# short synthetic sequence set — no real dataset download required.
+#
+# Usage:
+#   python scripts/run_experiment.py --config configs/experiments/optical_flow_demo.yaml
+#
+# Or programmatically:
+#   from eovot.experiment.runner import ExperimentRunner
+#   import yaml
+#   with open("configs/experiments/optical_flow_demo.yaml") as f:
+#       config = yaml.safe_load(f)
+#   runner = ExperimentRunner(output_dir="results/experiments", verbose=True)
+#   output = runner.run_from_config(config)
+#   print(output["leaderboard"])
+
+experiment:
+  name: optical-flow-demo
+  seed: 42
+  tdp_watts: null          # set to your CPU TDP (e.g. 15.0) to enable energy profiling
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-Linear
+  num_sequences: 10
+  num_frames: 80
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  motion: linear
+  seed: 42
+  max_sequences: null
+
+trackers:
+  - name: OpticalFlow
+    params:
+      max_corners: 200
+      min_corners: 10
+      quality_level: 0.01
+      min_distance: 7
+      fb_threshold: 1.0
+      lk_window: 21
+      max_level: 3
+      redetect_interval: 20
+
+  - name: MOSSE
+    params: {}
+
+  - name: MedianFlow
+    params: {}
