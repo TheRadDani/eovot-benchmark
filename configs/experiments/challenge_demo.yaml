@@ -1,0 +1,36 @@
+# Challenge Synthetic Dataset demo — no external data required.
+# Benchmarks classical trackers on sequences with specific VOT difficulty
+# attributes and reports per-attribute performance via AttributeAnalyzer.
+#
+# Usage:
+#   python scripts/run_experiment.py --config configs/experiments/challenge_demo.yaml
+
+experiment:
+  name: challenge-demo
+  seed: 42
+  tdp_watts: null
+
+dataset:
+  loader: ChallengeSyntheticDataset
+  challenge: occlusion        # one of: occlusion | scale_change | fast_motion | illumination
+  num_sequences: 5
+  num_frames: 120
+  frame_size: [320, 240]
+  base_bbox_size: [40, 40]
+  name: Challenge-Occlusion
+  # Challenge-specific parameters (all optional — shown with defaults):
+  occlusion_period: 20        # frames between occlusion events
+  occlusion_duration: 5       # frames each event lasts
+  # max_scale_factor: 2.5     # for scale_change mode
+  # burst_speed_factor: 5.0   # for fast_motion mode
+  # illumination_delta: 80    # for illumination mode
+
+trackers:
+  - name: MOSSE
+    params: {}
+  - name: KCF
+    params: {}
+  - name: CSRT
+    params: {}
+  - name: CamShift
+    params: {}
