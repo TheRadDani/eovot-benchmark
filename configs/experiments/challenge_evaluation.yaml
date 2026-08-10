@@ -1,0 +1,93 @@
+# EOVOT challenge-scenario evaluation experiment
+# -----------------------------------------------
+# Runs each tracker against all five structured challenge datasets so you can
+# see which failure modes affect each tracker and by how much.
+#
+# Run with:
+#   python scripts/run_experiment.py \
+#     --config configs/experiments/challenge_evaluation.yaml
+#
+# Each dataset entry targets one challenge type.  The `loader` field must be
+# set to ChallengeSyntheticDataset and `challenge` must be one of:
+#   illumination | size_change | partial_occlusion | disappearance | distractors
+#
+# Adjust `severity` (0.0 – 1.0) to tune difficulty.  A value of 0.7 gives a
+# realistic edge-deployment workload without being pathologically hard.
+
+experiment:
+  name: "challenge-scenario-evaluation"
+  seed: 42
+  tdp_watts: null
+
+# Run every tracker across all five challenge datasets.
+# The experiment runner iterates over datasets × trackers.
+datasets:
+  - loader: ChallengeSyntheticDataset
+    name: Challenge-Illumination
+    challenge: illumination
+    num_sequences: 10
+    num_frames: 120
+    frame_size: [320, 240]
+    bbox_size: [40, 40]
+    severity: 0.7
+    seed: 42
+
+  - loader: ChallengeSyntheticDataset
+    name: Challenge-SizeChange
+    challenge: size_change
+    num_sequences: 10
+    num_frames: 120
+    frame_size: [320, 240]
+    bbox_size: [40, 40]
+    severity: 0.7
+    seed: 42
+
+  - loader: ChallengeSyntheticDataset
+    name: Challenge-PartialOcclusion
+    challenge: partial_occlusion
+    num_sequences: 10
+    num_frames: 120
+    frame_size: [320, 240]
+    bbox_size: [40, 40]
+    severity: 0.7
+    seed: 42
+
+  - loader: ChallengeSyntheticDataset
+    name: Challenge-Disappearance
+    challenge: disappearance
+    num_sequences: 10
+    num_frames: 120
+    frame_size: [320, 240]
+    bbox_size: [40, 40]
+    severity: 0.7
+    seed: 42
+
+  - loader: ChallengeSyntheticDataset
+    name: Challenge-Distractors
+    challenge: distractors
+    num_sequences: 10
+    num_frames: 120
+    frame_size: [320, 240]
+    bbox_size: [40, 40]
+    severity: 0.7
+    seed: 42
+
+trackers:
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+      sigma: 2.0
+
+  - name: KCF
+    params:
+      learning_rate: 0.075
+      padding: 1.5
+
+  - name: CSRT
+    params: {}
+
+  - name: MIL
+    params: {}
+
+  - name: CamShift
+    params: {}
