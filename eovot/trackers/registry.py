@@ -29,6 +29,7 @@ from .kcf import KCFTracker
 from .median_flow import MedianFlowTracker
 from .mil import MILTracker
 from .mosse import MOSSETracker
+from .scale_mosse import ScaleMOSSETracker
 
 # Trackers that ship with plain opencv-python and require no external model
 # files — always safe to register eagerly.
@@ -39,6 +40,7 @@ TRACKER_REGISTRY: Dict[str, Type[BaseTracker]] = {
     "MIL": MILTracker,
     "MedianFlow": MedianFlowTracker,
     "CamShift": CamShiftTracker,
+    "ScaleMOSSE": ScaleMOSSETracker,
 }
 
 # DaSiamRPN / NanoTracker need pre-trained ONNX files the user supplies
@@ -62,7 +64,7 @@ def build_tracker(name: str, **params: Any) -> BaseTracker:
     """Instantiate a registered tracker by name.
 
     Args:
-        name:   Registry key, e.g. ``"KCF"`` or ``"MIL"``.
+        name:   Registry key, e.g. ``"KCF"`` or ``"ScaleMOSSE"``.
         params: Keyword arguments forwarded to the tracker's constructor.
 
     Returns:

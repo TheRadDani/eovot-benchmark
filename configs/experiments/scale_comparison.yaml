@@ -1,0 +1,33 @@
+# Scale-Adaptive vs. Fixed-Scale Tracker Comparison
+#
+# Compares ScaleMOSSE against the baseline MOSSE tracker on a synthetic
+# dataset to demonstrate the accuracy gain from multi-scale PSR estimation.
+# Run with:
+#   python scripts/run_experiment.py --config configs/experiments/scale_comparison.yaml
+
+experiment:
+  name: scale-comparison
+  seed: 42
+  tdp_watts: null   # set to your device TDP (e.g. 6.0 for RPi 4) for energy
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-ZoomTest
+  num_sequences: 10
+  num_frames: 150
+  motion: linear    # use circular or random for more challenging conditions
+
+trackers:
+  - name: MOSSE
+    params: {}
+
+  - name: ScaleMOSSE
+    params:
+      num_scales: 11
+      scale_step: 1.03
+      scale_lr: 0.25
+      learning_rate: 0.125
+
+  - name: KCF
+    params:
+      learning_rate: 0.075
