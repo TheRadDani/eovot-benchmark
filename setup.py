@@ -27,7 +27,8 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "eovot=scripts.run_benchmark:main",
+            # Unified CLI — subcommands: run, compare, simulate, list
+            "eovot=eovot.cli:main",
         ],
     },
 )
