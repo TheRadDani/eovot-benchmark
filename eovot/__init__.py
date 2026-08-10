@@ -2,6 +2,14 @@
 
 __version__ = "0.1.0"
 
-from eovot import benchmark, datasets, metrics, profiling, reporting, trackers
+from eovot import benchmark, constraints, datasets, metrics, profiling, reporting, trackers
 
-__all__ = ["benchmark", "datasets", "metrics", "profiling", "reporting", "trackers"]
+__all__ = [
+    "benchmark",
+    "constraints",
+    "datasets",
+    "metrics",
+    "profiling",
+    "reporting",
+    "trackers",
+]
