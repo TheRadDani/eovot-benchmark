@@ -1,0 +1,45 @@
+# DSST vs KCF scale-adaptive comparison
+# ----------------------------------------
+# Compares the Discriminative Scale Space Tracker (DSST) against KCF on a
+# synthetic dataset with linear and circular motion patterns.  The circular
+# motion sequence has constant scale, while the linear sequence has scale
+# variation due to random velocity changes.  Use this config to verify that
+# DSST accumulates a stable scale estimate while KCF drifts on sequences
+# where the target size changes.
+#
+# Run with:
+#   python scripts/run_experiment.py --config configs/experiments/dsst_vs_kcf.yaml
+
+experiment:
+  name: "dsst-vs-kcf-scale"
+  seed: 42
+  tdp_watts: null        # set to e.g. 6.0 to enable energy profiling
+
+dataset:
+  loader: SyntheticDataset
+  num_sequences: 20
+  num_frames: 150
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  motion: "linear"       # wall-bounce motion reveals scale drift in fixed-box trackers
+  seed: 42
+  name: "Synthetic-Linear-20seq"
+
+trackers:
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+
+  - name: KCF
+    params:
+      learning_rate: 0.075
+      padding: 1.5
+      kernel_sigma: 0.5
+
+  - name: DSST
+    params:
+      translation_lr: 0.075
+      scale_lr: 0.025
+      padding: 1.5
+      num_scales: 17
+      scale_step: 1.02
