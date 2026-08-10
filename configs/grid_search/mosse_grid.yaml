@@ -1,0 +1,26 @@
+# Grid search configuration for MOSSETracker
+# Run with: python scripts/run_grid_search.py --config configs/grid_search/mosse_grid.yaml
+
+tracker:
+  name: MOSSE
+  param_grid:
+    learning_rate: [0.075, 0.10, 0.125, 0.15]
+    sigma: [1.5, 2.0, 2.5]
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic
+  params:
+    num_sequences: 10
+    num_frames: 100
+    motion: linear
+    seed: 42
+
+benchmark:
+  max_sequences: null
+  verbose: true
+
+output:
+  dir: results/grid_search/
+  save_json: true
+  save_markdown: true
