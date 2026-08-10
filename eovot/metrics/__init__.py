@@ -1,4 +1,4 @@
-"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, and attribute analysis."""
+"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, attribute analysis, and protocol-specific evaluation."""
 
 from .accuracy import (
     iou,
@@ -23,6 +23,13 @@ from .statistical import (
     PairwiseSummary,
     StatisticalTestEngine,
 )
+from .protocols import (
+    GOT10kMetrics,
+    LaSOTMetrics,
+    OTBMetrics,
+    ProtocolMetricsEngine,
+    PROTOCOL_REGISTRY,
+)
 
 __all__ = [
     "iou",
@@ -45,4 +52,9 @@ __all__ = [
     "WilcoxonResult",
     "PairwiseSummary",
     "StatisticalTestEngine",
+    "GOT10kMetrics",
+    "LaSOTMetrics",
+    "OTBMetrics",
+    "ProtocolMetricsEngine",
+    "PROTOCOL_REGISTRY",
 ]
