@@ -5,6 +5,7 @@ from .csrt import CSRTTracker
 from .median_flow import MedianFlowTracker
 from .mil import MILTracker
 from .camshift import CamShiftTracker
+from .ensemble import EnsembleTracker
 from .registry import TRACKER_REGISTRY, available_trackers, build_tracker
 
 __all__ = [
@@ -16,6 +17,7 @@ __all__ = [
     "MedianFlowTracker",
     "MILTracker",
     "CamShiftTracker",
+    "EnsembleTracker",
     "TRACKER_REGISTRY",
     "available_trackers",
     "build_tracker",
