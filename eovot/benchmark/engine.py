@@ -21,11 +21,12 @@ class SequenceResult:
     sequence_name: str
     ious: np.ndarray
     profiling: ProfilingResult
-    predictions: Optional[np.ndarray] = None       # shape (N, 4) — predicted boxes
-    ground_truths: Optional[np.ndarray] = None     # shape (N, 4) — GT boxes aligned to predictions
-    center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
-    energy: Optional[EnergyResult] = None          # energy estimate; None when TDP not configured
-    accuracy_metrics: Optional[AccuracyMetrics] = None  # success AUC, precision AUC
+    predictions: Optional[np.ndarray] = None              # shape (N, 4) — predicted boxes
+    ground_truths: Optional[np.ndarray] = None            # shape (N, 4) — GT boxes aligned to predictions
+    center_distances: Optional[np.ndarray] = None         # shape (N,)   — per-frame centre-distance (px)
+    normalized_center_distances: Optional[np.ndarray] = None  # shape (N,) — dist / sqrt(GT area)
+    energy: Optional[EnergyResult] = None                 # energy estimate; None when TDP not configured
+    accuracy_metrics: Optional[AccuracyMetrics] = None    # full accuracy suite (OTB + GOT-10k + LaSOT)
 
     @property
     def mean_iou(self) -> float:
@@ -109,6 +110,27 @@ class BenchmarkResult:
                 if r.accuracy_metrics is not None]
         return float(np.mean(aucs)) if aucs else None
 
+    @property
+    def mean_success_rate_50(self) -> Optional[float]:
+        """Mean SR@0.5 across all sequences (GOT-10k metric), or ``None``."""
+        vals = [r.accuracy_metrics.success_rate_50 for r in self.sequence_results
+                if r.accuracy_metrics is not None]
+        return float(np.mean(vals)) if vals else None
+
+    @property
+    def mean_success_rate_75(self) -> Optional[float]:
+        """Mean SR@0.75 across all sequences (GOT-10k strict metric), or ``None``."""
+        vals = [r.accuracy_metrics.success_rate_75 for r in self.sequence_results
+                if r.accuracy_metrics is not None]
+        return float(np.mean(vals)) if vals else None
+
+    @property
+    def mean_normalized_precision_auc(self) -> Optional[float]:
+        """Mean Normalized Precision AUC across all sequences (LaSOT/GOT-10k), or ``None``."""
+        vals = [r.accuracy_metrics.normalized_precision_auc for r in self.sequence_results
+                if r.accuracy_metrics is not None]
+        return float(np.mean(vals)) if vals else None
+
     def summary(self) -> Dict:
         d: Dict = {
             "tracker": self.tracker_name,
@@ -127,6 +149,15 @@ class BenchmarkResult:
         pauc = self.mean_precision_auc
         if pauc is not None:
             d["precision_auc"] = round(pauc, 4)
+        sr50 = self.mean_success_rate_50
+        if sr50 is not None:
+            d["success_rate_50"] = round(sr50, 4)
+        sr75 = self.mean_success_rate_75
+        if sr75 is not None:
+            d["success_rate_75"] = round(sr75, 4)
+        np_auc = self.mean_normalized_precision_auc
+        if np_auc is not None:
+            d["normalized_precision_auc"] = round(np_auc, 4)
         e_total = self.total_energy_j
         if e_total is not None:
             d["total_energy_j"] = round(e_total, 4)
@@ -154,6 +185,13 @@ class BenchmarkResult:
             if r.accuracy_metrics is not None:
                 entry["success_auc"] = round(r.accuracy_metrics.success_auc, 4)
                 entry["precision_auc"] = round(r.accuracy_metrics.precision_auc, 4)
+                entry["success_rate_50"] = round(r.accuracy_metrics.success_rate_50, 4)
+                entry["success_rate_75"] = round(r.accuracy_metrics.success_rate_75, 4)
+                entry["normalized_precision_auc"] = round(r.accuracy_metrics.normalized_precision_auc, 4)
+            if r.normalized_center_distances is not None and len(r.normalized_center_distances) > 0:
+                entry["normalized_center_distances"] = [
+                    round(float(v), 6) for v in r.normalized_center_distances
+                ]
             if r.energy is not None:
                 entry["energy_j"] = round(r.energy.total_energy_j, 6)
                 entry["energy_per_frame_mj"] = round(r.energy.energy_per_frame_mj, 4)
@@ -254,6 +292,10 @@ class BenchmarkResult:
                 np.array(seq["center_distances"], dtype=np.float64)
                 if "center_distances" in seq else None
             )
+            norm_dists = (
+                np.array(seq["normalized_center_distances"], dtype=np.float64)
+                if "normalized_center_distances" in seq else None
+            )
             fps: float = float(seq.get("fps", 0.0))
             lat_ms: float = float(seq.get("mean_latency_ms", 1000.0 / fps if fps > 0 else 0.0))
             mem_mb: float = float(seq.get("peak_memory_mb", 0.0))
@@ -274,6 +316,9 @@ class BenchmarkResult:
                     mean_iou=float(seq.get("mean_iou", float(ious.mean()) if len(ious) else 0.0)),
                     success_auc=float(seq["success_auc"]),
                     precision_auc=float(seq.get("precision_auc", 0.0)),
+                    success_rate_50=float(seq.get("success_rate_50", 0.0)),
+                    success_rate_75=float(seq.get("success_rate_75", 0.0)),
+                    normalized_precision_auc=float(seq.get("normalized_precision_auc", 0.0)),
                 )
 
             energy: Optional[EnergyResult] = None
@@ -295,6 +340,7 @@ class BenchmarkResult:
                     ious=ious,
                     profiling=profiling,
                     center_distances=dists,
+                    normalized_center_distances=norm_dists,
                     energy=energy,
                     accuracy_metrics=accuracy,
                 )
@@ -408,7 +454,10 @@ class BenchmarkEngine:
         # Vectorised centre-distance computation (replaces element-wise Python loop).
         dists = self._metrics.batch_center_distance(preds_eval, gt_eval)
 
-        # Full VOT accuracy metrics: success AUC, precision AUC.
+        # Scale-invariant centre-distance normalised by sqrt(GT area) (GOT-10k / LaSOT NP metric).
+        norm_dists = self._metrics.batch_normalized_center_distance(preds_eval, gt_eval)
+
+        # Full VOT accuracy metrics: success AUC, precision AUC, SR@0.5, SR@0.75, NP AUC.
         accuracy = self._metrics.compute_all(preds_eval, gt_eval)
 
         energy: Optional[EnergyResult] = None
@@ -425,6 +474,7 @@ class BenchmarkEngine:
             predictions=preds_eval,
             ground_truths=gt_eval,
             center_distances=dists,
+            normalized_center_distances=norm_dists,
             energy=energy,
             accuracy_metrics=accuracy,
         )
