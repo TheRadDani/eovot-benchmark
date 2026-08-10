@@ -1,0 +1,34 @@
+# Skip-rate sweep configuration for MOSSE baseline
+# Reference parameters for run_skip_sweep.py
+#
+# Usage:
+#   python scripts/run_skip_sweep.py \
+#     --tracker MOSSE \
+#     --skip-rates 0 1 2 3 5 9 \
+#     --extrapolation linear \
+#     --num-sequences 10 \
+#     --num-frames 150 \
+#     --output results/skip_sweep_mosse.json \
+#     --plot results/skip_sweep_mosse.png
+#
+# Expected output shape:
+#   skip_rate=0   -> ~100% accuracy, 1x FPS  (baseline)
+#   skip_rate=1   -> ~95% accuracy, 2x FPS   (every other frame)
+#   skip_rate=2   -> ~88% accuracy, 3x FPS
+#   skip_rate=3   -> ~80% accuracy, 4x FPS
+#   skip_rate=5   -> ~70% accuracy, 6x FPS
+#   skip_rate=9   -> ~55% accuracy, 10x FPS  (heavy skipping)
+#
+# Interpretation:
+#   - The Pareto curve reveals the best skip rate for a given FPS budget.
+#   - Compare 'last' vs 'linear' extrapolation to quantify motion benefit.
+#   - Run the same sweep on KCF/CSRT for a cross-tracker Pareto overlay.
+
+tracker: MOSSE
+dataset: synthetic
+skip_rates: [0, 1, 2, 3, 5, 9]
+extrapolation: linear
+num_sequences: 10
+num_frames: 150
+output: results/skip_sweep_mosse.json
+plot: results/skip_sweep_mosse.png

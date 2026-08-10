@@ -1,0 +1,21 @@
+# Skip-rate sweep configuration for KCF tracker
+# Reference parameters for run_skip_sweep.py
+#
+# Usage:
+#   python scripts/run_skip_sweep.py \
+#     --tracker KCF \
+#     --skip-rates 0 1 2 3 5 9 \
+#     --extrapolation linear \
+#     --num-sequences 10 \
+#     --num-frames 150 \
+#     --output results/skip_sweep_kcf.json \
+#     --plot results/skip_sweep_kcf.png
+
+tracker: KCF
+dataset: synthetic
+skip_rates: [0, 1, 2, 3, 5, 9]
+extrapolation: linear
+num_sequences: 10
+num_frames: 150
+output: results/skip_sweep_kcf.json
+plot: results/skip_sweep_kcf.png

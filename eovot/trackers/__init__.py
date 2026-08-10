@@ -1,13 +1,15 @@
+from .adaptive import FrameSkipTracker
 from .base import BaseTracker, BBox
-from .mosse import MOSSETracker
-from .kcf import KCFTracker
+from .camshift import CamShiftTracker
 from .csrt import CSRTTracker
+from .kcf import KCFTracker
 from .median_flow import MedianFlowTracker
 from .mil import MILTracker
-from .camshift import CamShiftTracker
+from .mosse import MOSSETracker
 from .registry import TRACKER_REGISTRY, available_trackers, build_tracker
 
 __all__ = [
+    "FrameSkipTracker",
     "BaseTracker",
     "BBox",
     "MOSSETracker",
