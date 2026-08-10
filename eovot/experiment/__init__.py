@@ -2,5 +2,12 @@
 
 from .runner import ExperimentRunner
 from .snapshot import ReproducibilitySnapshot
+from .prediction_io import PredictionExporter, PredictionLoader, PredictionComparator
 
-__all__ = ["ExperimentRunner", "ReproducibilitySnapshot"]
+__all__ = [
+    "ExperimentRunner",
+    "ReproducibilitySnapshot",
+    "PredictionExporter",
+    "PredictionLoader",
+    "PredictionComparator",
+]
