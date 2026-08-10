@@ -38,3 +38,13 @@ trackers:
 
   - name: MedianFlow
     params: {}
+
+  - name: CamShift
+    params: {}
+
+  - name: KalmanFilter
+    params:
+      process_noise: 1.0
+      measurement_noise: 10.0
+      search_factor: 2.5
+      ncc_threshold: 0.3

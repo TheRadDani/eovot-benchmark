@@ -25,6 +25,7 @@ from typing import Any, Dict, Type
 from .base import BaseTracker
 from .camshift import CamShiftTracker
 from .csrt import CSRTTracker
+from .kalman import KalmanFilterTracker
 from .kcf import KCFTracker
 from .median_flow import MedianFlowTracker
 from .mil import MILTracker
@@ -39,6 +40,7 @@ TRACKER_REGISTRY: Dict[str, Type[BaseTracker]] = {
     "MIL": MILTracker,
     "MedianFlow": MedianFlowTracker,
     "CamShift": CamShiftTracker,
+    "KalmanFilter": KalmanFilterTracker,
 }
 
 # DaSiamRPN / NanoTracker need pre-trained ONNX files the user supplies

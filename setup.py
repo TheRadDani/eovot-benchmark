@@ -20,6 +20,7 @@ setup(
         "pandas>=1.3",
         "pyyaml>=6.0",
         "tqdm>=4.62",
+        "matplotlib>=3.5",
     ],
     extras_require={
         "torch": ["torch>=1.13"],
