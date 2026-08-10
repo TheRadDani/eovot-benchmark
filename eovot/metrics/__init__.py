@@ -23,6 +23,11 @@ from .statistical import (
     PairwiseSummary,
     StatisticalTestEngine,
 )
+from .attribute_analysis import (
+    AttributeSliceResult,
+    AttributeAnalysisReport,
+    AttributeAnalyzer,
+)
 
 __all__ = [
     "iou",
@@ -45,4 +50,7 @@ __all__ = [
     "WilcoxonResult",
     "PairwiseSummary",
     "StatisticalTestEngine",
+    "AttributeSliceResult",
+    "AttributeAnalysisReport",
+    "AttributeAnalyzer",
 ]
