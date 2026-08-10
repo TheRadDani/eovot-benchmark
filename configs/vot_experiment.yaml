@@ -1,0 +1,69 @@
+# VOT Reset-Protocol Experiment Configuration
+# ============================================
+# Evaluates trackers under the VOT challenge reset protocol.
+# Use with: python scripts/run_vot_experiment.py --config configs/vot_experiment.yaml
+#
+# The reset protocol re-initialises the tracker from the ground-truth whenever
+# IoU drops below `failure_threshold`, inserting a `gap_frames`-long penalty
+# window of zero IoU.  The primary metric is Expected Average Overlap (EAO).
+
+experiment:
+  name: "vot-reset-baseline"
+  description: >
+    Baseline comparison of classical trackers under the VOT reset protocol.
+    EAO (Expected Average Overlap) is the primary ranking metric.
+  output_dir: "results/vot_reset"
+  seed: 42
+
+# --- VOT reset protocol parameters ---
+vot:
+  failure_threshold: 0.1     # IoU below which a failure is declared (standard VOT)
+  gap_frames: 5              # Penalty frames between failure and re-initialization
+  eao_range: [100, 356]      # Typical sequence-length range for EAO integration (VOT2016)
+
+# --- Trackers to evaluate ---
+trackers:
+  - name: "MOSSE"
+    class: "eovot.trackers.mosse.MOSSETracker"
+    params: {}
+
+  - name: "KCF"
+    class: "eovot.trackers.kcf.KCFTracker"
+    params: {}
+
+  - name: "MIL"
+    class: "eovot.trackers.mil.MILTracker"
+    params: {}
+
+  - name: "CSRT"
+    class: "eovot.trackers.csrt.CSRTTracker"
+    params: {}
+
+  - name: "MedianFlow"
+    class: "eovot.trackers.median_flow.MedianFlowTracker"
+    params: {}
+
+# --- Dataset ---
+# Set `type` to "synthetic" for offline testing without real data.
+# Replace with "otb", "got10k", or "lasot" for full benchmark runs.
+dataset:
+  type: "synthetic"
+  params:
+    num_sequences: 20
+    frames_per_sequence: 300
+    frame_size: [640, 480]
+    seed: 42
+    motion_pattern: "random"   # "linear" | "circular" | "random"
+
+# Uncomment to use a real dataset:
+# dataset:
+#   type: "otb"
+#   params:
+#     root: "/data/OTB100"
+
+# --- Reporting ---
+reporting:
+  save_json: true
+  save_csv: true
+  save_markdown: true
+  verbose: true
