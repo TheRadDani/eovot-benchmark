@@ -1,0 +1,46 @@
+# Budget Analysis Experiment
+# --------------------------
+# Characterise the accuracy-throughput frontier for KCF under different
+# FPS budgets using AdaptiveBudgetTracker.
+#
+# Run with:
+#   python scripts/run_experiment.py --config configs/experiments/budget_analysis.yaml
+#
+# Expected output: per-budget accuracy table + Markdown frontier report.
+
+experiment:
+  name: "budget-analysis-kcf"
+  seed: 42
+  tdp_watts: null           # set to device TDP (e.g. 6.0 for RPi4) for energy estimates
+
+dataset:
+  loader: "SyntheticDataset"
+  name: "Synthetic"
+  num_sequences: 10
+  num_frames: 150
+  motion: "linear"
+
+# Each tracker entry is run wrapped in AdaptiveBudgetTracker at the
+# corresponding fps_target; the experiment runner reports the accuracy
+# achieved at each budget point.
+trackers:
+  - name: KCF
+    fps_target: 15
+    params: {}
+  - name: KCF
+    fps_target: 30
+    params: {}
+  - name: KCF
+    fps_target: 60
+    params: {}
+  - name: KCF
+    fps_target: 120
+    params: {}
+
+benchmark:
+  verbose: false
+  budget_analysis: true     # signals the runner to wrap trackers in AdaptiveBudgetTracker
+
+reporting:
+  formats: ["json", "csv", "markdown"]
+  print_summary: true
