@@ -192,6 +192,7 @@ class ExperimentRunner:
             miou = float(s.get("mean_iou", 0.0))
             sauc = float(s.get("success_auc", miou))   # fall back to mIoU
             pauc = float(s.get("precision_auc", 0.0))
+            npauc = float(s.get("normalized_precision_auc", 0.0))
             rows.append(
                 {
                     "tracker": s.get("tracker", "?"),
@@ -199,6 +200,7 @@ class ExperimentRunner:
                     "mIoU": miou,
                     "success_auc": sauc,
                     "precision_auc": pauc,
+                    "normalized_precision_auc": npauc,
                     "fps": float(s.get("mean_fps", 0.0)),
                     "mem_mb": float(s.get("peak_memory_mb", 0.0)),
                     "n_seq": int(s.get("num_sequences", 0)),
@@ -209,14 +211,15 @@ class ExperimentRunner:
 
         lines = [
             "# EOVOT Experiment Leaderboard\n",
-            "| Rank | Tracker | Dataset | mIoU | Success AUC | Precision AUC | FPS | Mem (MB) | Sequences |",
-            "|------|---------|---------|-----:|------------:|--------------:|----:|---------:|----------:|",
+            "| Rank | Tracker | Dataset | mIoU | Success AUC | Prec AUC | nPrec AUC | FPS | Mem (MB) | Sequences |",
+            "|------|---------|---------|-----:|------------:|---------:|----------:|----:|---------:|----------:|",
         ]
         for rank, row in enumerate(rows, start=1):
             lines.append(
                 f"| {rank} | {row['tracker']} | {row['dataset']} "
                 f"| {row['mIoU']:.4f} | {row['success_auc']:.4f} "
-                f"| {row['precision_auc']:.4f} | {row['fps']:.1f} "
+                f"| {row['precision_auc']:.4f} | {row['normalized_precision_auc']:.4f} "
+                f"| {row['fps']:.1f} "
                 f"| {row['mem_mb']:.1f} | {row['n_seq']} |"
             )
         lines.append("")

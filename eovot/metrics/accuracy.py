@@ -9,10 +9,12 @@ LaSOT benchmarks:
 - **Precision Curve** — fraction of frames whose predicted centre is
   within a pixel-distance threshold of the ground-truth centre,
   swept from 0 to 50 px; AUC at 20 px is the canonical scalar.
-- **Normalized Precision Curve** — LaSOT-standard precision where the
-  centre distance is divided by √(GT_area) before thresholding, making
-  the metric scale-invariant across objects of different sizes and
-  video resolutions.  Canonical threshold: 0.20.
+- **Normalized Precision Curve** — scale-invariant precision where centre
+  distance is divided by the GT box diagonal (``sqrt(w²+h²)``) before
+  thresholding.  Introduced in GOT-10k (Huang et al., 2019) and adopted as
+  the primary precision scalar in VOT 2020+ and TrackingNet.  Also aligned
+  with the LaSOT evaluation standard (Li et al., CVPR 2019).  Canonical
+  threshold: 0.20.
 - **AccuracyMetrics** dataclass that bundles all scalars together.
 
 References:
@@ -74,6 +76,28 @@ def center_distance(pred: BBox, gt: BBox) -> float:
     return float(np.sqrt(dx * dx + dy * dy))
 
 
+def normalized_center_distance(pred: BBox, gt: BBox) -> float:
+    """Scale-invariant centre distance normalised by the GT box diagonal.
+
+    Divides the pixel-space Euclidean distance by ``sqrt(w_gt^2 + h_gt^2)``,
+    making the metric comparable across sequences with different target sizes.
+    This is the normalization adopted by GOT-10k, VOT 2020+, and TrackingNet.
+
+    Args:
+        pred: Predicted box ``(x, y, w, h)``.
+        gt:   Ground-truth box ``(x, y, w, h)``.
+
+    Returns:
+        Normalised distance in ``[0, ∞)``.  Returns ``0.0`` when the GT box
+        is degenerate (zero diagonal).
+    """
+    _, _, gw, gh = gt
+    diag = float(np.sqrt(gw * gw + gh * gh))
+    if diag < 1e-6:
+        return 0.0
+    return center_distance(pred, gt) / diag
+
+
 @dataclass
 class AccuracyMetrics:
     """Scalar accuracy summary for a tracker on a dataset or sequence."""
@@ -94,13 +118,21 @@ class AccuracyMetrics:
     divided by √(GT_area) before thresholding.  The canonical per-point
     score is reported at threshold 0.20."""
 
+    normalized_precision_auc: float = 0.0
+    """AUC of the Normalized Precision Curve (thresholds 0 → 0.5 normalised units).
+
+    The canonical precision scalar for GOT-10k, VOT 2020+, and TrackingNet.
+    Scale-invariant: a 5 px error on a 20 px target and a 50 px error on a
+    200 px target both yield the same normalised distance (0.25 / diagonal).
+    """
+
     def __str__(self) -> str:
         return (
             f"AccuracyMetrics("
             f"mIoU={self.mean_iou:.4f}, "
             f"success_AUC={self.success_auc:.4f}, "
             f"precision_AUC={self.precision_auc:.4f}, "
-            f"norm_precision_AUC={self.norm_precision_auc:.4f})"
+            f"nPrec_AUC={self.normalized_precision_auc:.4f})"
         )
 
 
@@ -168,6 +200,36 @@ class MetricsEngine:
         gc = g[:, :2] + g[:, 2:] / 2.0   # GT centres (N, 2)
         return np.sqrt(np.sum((pc - gc) ** 2, axis=1))
 
+    def batch_normalized_center_distance(
+        self, preds: np.ndarray, gts: np.ndarray
+    ) -> np.ndarray:
+        """Vectorised scale-invariant centre distance normalised by GT diagonal.
+
+        Each frame's pixel distance is divided by ``sqrt(w_gt^2 + h_gt^2)``.
+        Frames with degenerate GT boxes (diagonal < 1e-6) receive distance 0.
+
+        Args:
+            preds: ``(N, 4)`` array of predicted boxes ``(x, y, w, h)``.
+            gts:   ``(N, 4)`` array of ground-truth boxes ``(x, y, w, h)``.
+
+        Returns:
+            ``(N,)`` float64 array of normalised distances in ``[0, ∞)``.
+        """
+        n = min(len(preds), len(gts))
+        if n == 0:
+            return np.empty(0, dtype=np.float64)
+        p = np.asarray(preds[:n], dtype=np.float64)
+        g = np.asarray(gts[:n], dtype=np.float64)
+
+        pc = p[:, :2] + p[:, 2:] / 2.0
+        gc = g[:, :2] + g[:, 2:] / 2.0
+        pixel_dists = np.sqrt(np.sum((pc - gc) ** 2, axis=1))
+
+        diagonals = np.sqrt(g[:, 2] ** 2 + g[:, 3] ** 2)
+        valid = diagonals >= 1e-6
+        norm_dists = np.where(valid, pixel_dists / np.where(valid, diagonals, 1.0), 0.0)
+        return norm_dists
+
     def success_curve(
         self,
         ious: np.ndarray,
@@ -221,61 +283,26 @@ class MetricsEngine:
         gts: np.ndarray,
         thresholds: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Normalized Precision curve (LaSOT evaluation standard).
+        """Normalized Precision curve: fraction of frames with norm-dist < threshold.
 
-        Unlike the OTB precision curve which uses raw pixel distances,
-        this method normalizes the centre-to-centre distance by the
-        square root of the GT bounding-box area before thresholding::
-
-            norm_dist_t = ||pred_centre_t - gt_centre_t|| / sqrt(gt_w_t * gt_h_t)
-
-        This makes the metric **scale-invariant**: a tracker that drifts by
-        20 % of the target diagonal receives the same score regardless of
-        whether the target is 30 × 30 or 300 × 300 pixels.  The canonical
-        LaSOT evaluation threshold is **0.20** (i.e. the predicted centre
-        is within 20 % of the target "radius" of the GT centre).
+        Normalises centre distance by the GT box diagonal (``sqrt(w²+h²)``)
+        before thresholding, making the metric scale-invariant across sequences
+        with different target sizes.  Adopted in GOT-10k, VOT 2020+, TrackingNet,
+        and LaSOT.  Canonical threshold: 0.20.
 
         Args:
             preds:      ``(N, 4)`` predicted boxes ``(x, y, w, h)``.
             gts:        ``(N, 4)`` ground-truth boxes ``(x, y, w, h)``.
-            thresholds: Normalized distance thresholds (default: 0 … 0.5,
-                        51 points).  The range [0, 0.5] covers the
-                        practically meaningful regime; beyond 0.5 the
-                        target centre would be outside the GT box entirely.
+            thresholds: Normalised distance thresholds (default: 0 … 0.5, 51 pts).
 
         Returns:
-            ``(thresholds, norm_precision_rates)`` — both shape ``(T,)``.
-            ``norm_precision_rates[i]`` is the fraction of frames where
-            ``norm_dist < thresholds[i]``.
-
-        Note:
-            GT boxes with zero area are assigned a normalized distance of
-            ``inf`` and therefore never satisfy any finite threshold.
+            ``(thresholds, precision_rates)`` — both shape ``(T,)``.
         """
         if thresholds is None:
             thresholds = np.linspace(0.0, 0.5, 51)
-
-        n = min(len(preds), len(gts))
-        if n == 0:
+        norm_dists = self.batch_normalized_center_distance(preds, gts)
+        if len(norm_dists) == 0:
             return thresholds, np.zeros(len(thresholds), dtype=np.float64)
-
-        p = np.asarray(preds[:n], dtype=np.float64)
-        g = np.asarray(gts[:n], dtype=np.float64)
-
-        # Vectorised centre-to-centre Euclidean distance
-        pc = p[:, :2] + p[:, 2:] / 2.0
-        gc = g[:, :2] + g[:, 2:] / 2.0
-        raw_dists = np.sqrt(np.sum((pc - gc) ** 2, axis=1))
-
-        # Normalise by √(GT area).
-        # Degenerate GT boxes (area ≤ 0) receive norm_dist = inf so they
-        # never satisfy a finite threshold and are counted as failures.
-        gt_area = g[:, 2] * g[:, 3]
-        valid = gt_area > 0
-        norm_dists = np.full(n, np.inf, dtype=np.float64)
-        if np.any(valid):
-            norm_dists[valid] = raw_dists[valid] / np.sqrt(gt_area[valid])
-
         rates = np.array([(norm_dists < t).mean() for t in thresholds])
         return thresholds, rates
 
@@ -284,7 +311,11 @@ class MetricsEngine:
         preds: np.ndarray,
         gts: np.ndarray,
     ) -> AccuracyMetrics:
-        """Compute mean IoU, success AUC, precision AUC, and normalized precision AUC.
+        """Compute all standard VOT accuracy scalars in one call.
+
+        Computes mean IoU, Success AUC, Precision AUC, and Normalized
+        Precision AUC.  The nPrec AUC is the primary precision scalar used
+        in GOT-10k, VOT 2020+, TrackingNet, and LaSOT benchmarks.
 
         Args:
             preds: ``(N, 4)`` predicted boxes.
@@ -299,7 +330,7 @@ class MetricsEngine:
         try:
             _trapz = np.trapezoid  # numpy ≥ 2.0
         except AttributeError:
-            _trapz = np.trapz  # numpy < 2.0  # type: ignore[attr-defined]
+            _trapz = np.trapz  # numpy < 2.0
 
         thr_iou, sr = self.success_curve(ious)
         success_auc = float(_trapz(sr, thr_iou))
@@ -307,12 +338,15 @@ class MetricsEngine:
         thr_dist, pr = self.precision_curve(preds, gts)
         prec_auc = float(_trapz(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
 
-        thr_np, npr = self.normalized_precision_curve(preds, gts)
-        norm_prec_auc = float(_trapz(npr, thr_np) / thr_np[-1]) if thr_np[-1] > 0 else 0.0
+        thr_norm, npr = self.normalized_precision_curve(preds, gts)
+        nprec_auc = (
+            float(_trapz(npr, thr_norm) / thr_norm[-1]) if thr_norm[-1] > 0 else 0.0
+        )
 
         return AccuracyMetrics(
             mean_iou=float(ious.mean()),
             success_auc=success_auc,
             precision_auc=prec_auc,
-            norm_precision_auc=norm_prec_auc,
+            norm_precision_auc=nprec_auc,
+            normalized_precision_auc=nprec_auc,
         )
