@@ -3,6 +3,7 @@
 from .accuracy import (
     iou,
     center_distance,
+    normalized_center_distance,
     AccuracyMetrics,
     MetricsEngine,
 )
@@ -27,6 +28,7 @@ from .statistical import (
 __all__ = [
     "iou",
     "center_distance",
+    "normalized_center_distance",
     "AccuracyMetrics",
     "MetricsEngine",
     "ALL_ATTRIBUTES",
