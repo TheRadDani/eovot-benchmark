@@ -9,6 +9,10 @@ LaSOT benchmarks:
 - **Precision Curve** — fraction of frames whose predicted centre is
   within a pixel-distance threshold of the ground-truth centre,
   swept from 0 to 50 px; AUC at 20 px is the canonical scalar.
+- **Normalized Precision Curve** — GOT-10k protocol variant where the
+  distance threshold is normalised by ``sqrt(GT area)`` so results are
+  resolution-agnostic and comparable across targets of different sizes.
+  The canonical scalar is the AUC at a normalised threshold of 0.2.
 - **AccuracyMetrics** dataclass that bundles all scalars together.
 """
 
@@ -79,12 +83,22 @@ class AccuracyMetrics:
     precision_auc: float
     """Normalised AUC of the Precision Curve (distance thresholds 0 → 50 px)."""
 
+    normalized_precision_auc: float = 0.0
+    """AUC of the Normalized Precision Curve (GOT-10k protocol).
+
+    Thresholds are relative to ``sqrt(GT area)``, making the metric
+    resolution-agnostic and comparable across targets of different physical
+    sizes.  The canonical scalar is the success rate at threshold 0.2
+    (centre error < 20 % of target diameter).  Range: ``[0, 1]``.
+    """
+
     def __str__(self) -> str:
         return (
             f"AccuracyMetrics("
             f"mIoU={self.mean_iou:.4f}, "
             f"success_AUC={self.success_auc:.4f}, "
-            f"precision_AUC={self.precision_auc:.4f})"
+            f"precision_AUC={self.precision_auc:.4f}, "
+            f"norm_precision_AUC={self.normalized_precision_auc:.4f})"
         )
 
 
@@ -196,37 +210,92 @@ class MetricsEngine:
         rates = np.array([(dists < t).mean() for t in thresholds])
         return thresholds, rates
 
+    def normalized_precision_curve(
+        self,
+        preds: np.ndarray,
+        gts: np.ndarray,
+        thresholds: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Normalized Precision curve — GOT-10k evaluation protocol.
+
+        Unlike the standard precision curve (which uses fixed pixel
+        thresholds that are resolution-dependent), this curve normalises
+        the centre-to-centre distance by ``sqrt(GT width × GT height)``
+        so that the threshold is relative to the target's spatial extent.
+
+        A threshold of 0.2 means: the tracker is considered precise when
+        its predicted centre is within 20 % of the target's "diameter"
+        (geometric mean of width and height).  This makes the metric
+        comparable across sequences with vastly different target sizes —
+        a critical property when aggregating results over GOT-10k.
+
+        Args:
+            preds:      ``(N, 4)`` array of predicted boxes ``(x, y, w, h)``.
+            gts:        ``(N, 4)`` array of ground-truth boxes ``(x, y, w, h)``.
+            thresholds: Normalised distance thresholds to sweep.
+                Default: ``np.linspace(0, 0.5, 51)`` — matching the GOT-10k
+                evaluation tool's range.
+
+        Returns:
+            ``(thresholds, precision_rates)`` — both shape ``(T,)``.
+            ``precision_rates[i]`` is the fraction of frames where
+            ``dist / sqrt(GT_area) < thresholds[i]``.
+        """
+        if thresholds is None:
+            thresholds = np.linspace(0.0, 0.5, 51)
+        n = min(len(preds), len(gts))
+        if n == 0:
+            return thresholds, np.zeros_like(thresholds)
+
+        p = np.asarray(preds[:n], dtype=np.float64)
+        g = np.asarray(gts[:n], dtype=np.float64)
+
+        pc = p[:, :2] + p[:, 2:] / 2.0
+        gc = g[:, :2] + g[:, 2:] / 2.0
+        dists = np.sqrt(np.sum((pc - gc) ** 2, axis=1))
+
+        gt_areas = g[:, 2] * g[:, 3]
+        gt_sizes = np.sqrt(np.maximum(gt_areas, 1e-6))
+        norm_dists = dists / gt_sizes
+
+        rates = np.array([(norm_dists < t).mean() for t in thresholds])
+        return thresholds, rates
+
     def compute_all(
         self,
         preds: np.ndarray,
         gts: np.ndarray,
     ) -> AccuracyMetrics:
-        """Compute mean IoU, success AUC, and precision AUC in one call.
+        """Compute mean IoU, success AUC, precision AUC, and normalized precision AUC.
 
         Args:
             preds: ``(N, 4)`` predicted boxes.
             gts:   ``(N, 4)`` ground-truth boxes.
 
         Returns:
-            :class:`AccuracyMetrics` with all scalar summaries populated.
+            :class:`AccuracyMetrics` with all scalar summaries populated,
+            including the GOT-10k-compatible normalized precision AUC.
         """
         ious = self.batch_iou(preds, gts)
 
         # np.trapezoid was introduced in NumPy 2.0; np.trapz was removed in 2.0.
-        _trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz  # type: ignore[attr-defined]
-
-        thr_iou, sr = self.success_curve(ious)
         try:
             _trapz = np.trapezoid  # numpy ≥ 2.0
         except AttributeError:
             _trapz = np.trapz  # numpy < 2.0
+
+        thr_iou, sr = self.success_curve(ious)
         success_auc = float(_trapz(sr, thr_iou))
 
         thr_dist, pr = self.precision_curve(preds, gts)
         prec_auc = float(_trapz(pr, thr_dist) / thr_dist[-1]) if thr_dist[-1] > 0 else 0.0
 
+        thr_np, npr = self.normalized_precision_curve(preds, gts)
+        np_auc = float(_trapz(npr, thr_np) / thr_np[-1]) if thr_np[-1] > 0 else 0.0
+
         return AccuracyMetrics(
             mean_iou=float(ious.mean()),
             success_auc=success_auc,
             precision_auc=prec_auc,
+            normalized_precision_auc=np_auc,
         )

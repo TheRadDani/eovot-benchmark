@@ -109,6 +109,13 @@ class BenchmarkResult:
                 if r.accuracy_metrics is not None]
         return float(np.mean(aucs)) if aucs else None
 
+    @property
+    def mean_normalized_precision_auc(self) -> Optional[float]:
+        """Mean normalized precision AUC (GOT-10k protocol) across all sequences."""
+        aucs = [r.accuracy_metrics.normalized_precision_auc for r in self.sequence_results
+                if r.accuracy_metrics is not None]
+        return float(np.mean(aucs)) if aucs else None
+
     def summary(self) -> Dict:
         d: Dict = {
             "tracker": self.tracker_name,
@@ -127,6 +134,9 @@ class BenchmarkResult:
         pauc = self.mean_precision_auc
         if pauc is not None:
             d["precision_auc"] = round(pauc, 4)
+        npauc = self.mean_normalized_precision_auc
+        if npauc is not None:
+            d["normalized_precision_auc"] = round(npauc, 4)
         e_total = self.total_energy_j
         if e_total is not None:
             d["total_energy_j"] = round(e_total, 4)
@@ -154,6 +164,7 @@ class BenchmarkResult:
             if r.accuracy_metrics is not None:
                 entry["success_auc"] = round(r.accuracy_metrics.success_auc, 4)
                 entry["precision_auc"] = round(r.accuracy_metrics.precision_auc, 4)
+                entry["normalized_precision_auc"] = round(r.accuracy_metrics.normalized_precision_auc, 4)
             if r.energy is not None:
                 entry["energy_j"] = round(r.energy.total_energy_j, 6)
                 entry["energy_per_frame_mj"] = round(r.energy.energy_per_frame_mj, 4)
@@ -274,6 +285,7 @@ class BenchmarkResult:
                     mean_iou=float(seq.get("mean_iou", float(ious.mean()) if len(ious) else 0.0)),
                     success_auc=float(seq["success_auc"]),
                     precision_auc=float(seq.get("precision_auc", 0.0)),
+                    normalized_precision_auc=float(seq.get("normalized_precision_auc", 0.0)),
                 )
 
             energy: Optional[EnergyResult] = None
