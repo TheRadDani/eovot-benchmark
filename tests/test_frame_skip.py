@@ -198,18 +198,25 @@ class TestFrameSkipWithEngine:
         )
         assert direct.mean_iou == pytest.approx(wrapped.mean_iou, abs=1e-3)
 
-    def test_higher_skip_rate_higher_fps(self):
+    def test_higher_skip_rate_fewer_inner_calls(self):
+        """skip_rate=3 should call the inner tracker ~1/3 as often as skip_rate=1.
+
+        Comparing absolute FPS on a trivial mock tracker is timing-sensitive
+        and flaky on fast CI runners (wrapper overhead can dominate).  This
+        test instead checks the logical guarantee: frame-skipping reduces the
+        number of real tracker evaluations.
+        """
+        inner3 = _CountingTracker()
+        fst = FrameSkipTracker(inner3, skip_rate=3)
+
         engine = BenchmarkEngine(verbose=False)
-        dataset = _TinyDataset(n=2)
-        r1 = engine.run(_CountingTracker(), dataset, dataset_name="Syn")
-        r3 = engine.run(
-            FrameSkipTracker(_CountingTracker(), skip_rate=3),
-            dataset,
-            dataset_name="Syn",
-        )
-        # skip_rate=3 should be at least as fast as skip_rate=1
-        # (on a constant tracker the overhead is negligible, allow 10% slack)
-        assert r3.mean_fps >= r1.mean_fps * 0.5
+        single_seq = _TinyDataset(n=1)
+        engine.run(fst, single_seq, dataset_name="Syn")
+
+        # _InMemSeq has _N=20 frames; frame 0 is init, frames 1-19 are update.
+        # With skip_rate=3: frames 1, 4, 7, 10, 13, 16, 19 → 7 real calls.
+        assert inner3.update_calls < _N  # strictly fewer than the 19 possible calls
+        assert inner3.update_calls <= (_N // 3) + 1  # roughly 1/3 of updates
 
     def test_tracker_name_propagated(self):
         engine = BenchmarkEngine(verbose=False)
