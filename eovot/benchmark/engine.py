@@ -151,15 +151,24 @@ class BenchmarkResult:
         Returns a nested dict with keys ``"summary"`` (aggregate metrics)
         and ``"sequences"`` (per-sequence breakdown), suitable for JSON
         export and Markdown table generation.
+
+        All profiling tail-latency fields (p95, p99, std, CV) and all energy
+        fields (TDP, mean power, CPU utilisation) are preserved so that
+        :meth:`from_dict` can reconstruct them exactly.
         """
         sequences = []
         for r in self.sequence_results:
+            p = r.profiling
             entry: Dict = {
                 "sequence_name": r.sequence_name,
                 "mean_iou": round(r.mean_iou, 4),
-                "fps": round(r.profiling.fps, 2),
-                "mean_latency_ms": round(r.profiling.latency_mean_ms, 3),
-                "peak_memory_mb": round(r.profiling.peak_memory_mb, 2),
+                "fps": round(p.fps, 2),
+                "mean_latency_ms": round(p.latency_mean_ms, 3),
+                "latency_std_ms": round(p.latency_std_ms, 3),
+                "latency_p95_ms": round(p.latency_p95_ms, 3),
+                "latency_p99_ms": round(p.latency_p99_ms, 3),
+                "latency_cv": round(p.latency_cv, 6),
+                "peak_memory_mb": round(p.peak_memory_mb, 2),
             }
             if r.accuracy_metrics is not None:
                 entry["success_auc"] = round(r.accuracy_metrics.success_auc, 4)
@@ -168,6 +177,10 @@ class BenchmarkResult:
             if r.energy is not None:
                 entry["energy_j"] = round(r.energy.total_energy_j, 6)
                 entry["energy_per_frame_mj"] = round(r.energy.energy_per_frame_mj, 4)
+                entry["energy_tdp_watts"] = round(r.energy.tdp_watts, 4)
+                entry["energy_mean_power_w"] = round(r.energy.mean_power_w, 4)
+                entry["energy_peak_cpu_pct"] = round(r.energy.peak_cpu_pct, 2)
+                entry["energy_mean_cpu_pct"] = round(r.energy.mean_cpu_pct, 2)
             # Per-frame arrays enable full success/precision curve plots from JSON.
             if r.ious is not None and len(r.ious) > 0:
                 entry["ious"] = [round(float(v), 6) for v in r.ious]
@@ -268,14 +281,20 @@ class BenchmarkResult:
             fps: float = float(seq.get("fps", 0.0))
             lat_ms: float = float(seq.get("mean_latency_ms", 1000.0 / fps if fps > 0 else 0.0))
             mem_mb: float = float(seq.get("peak_memory_mb", 0.0))
+            lat_std: float = float(seq.get("latency_std_ms", 0.0))
+            lat_p95: float = float(seq.get("latency_p95_ms", lat_ms))
+            lat_p99: float = float(seq.get("latency_p99_ms", lat_ms))
+            lat_cv: float = float(seq.get("latency_cv", 0.0))
 
             profiling = ProfilingResult(
                 tracker_name=tracker_name,
                 frame_count=len(ious),
                 fps=fps,
                 latency_mean_ms=lat_ms,
-                latency_std_ms=0.0,
-                latency_p95_ms=lat_ms,
+                latency_std_ms=lat_std,
+                latency_p95_ms=lat_p95,
+                latency_p99_ms=lat_p99,
+                latency_cv=lat_cv,
                 peak_memory_mb=mem_mb,
             )
 
@@ -293,12 +312,12 @@ class BenchmarkResult:
                 energy = EnergyResult(
                     tracker_name=tracker_name,
                     frame_count=len(ious),
-                    tdp_watts=0.0,
+                    tdp_watts=float(seq.get("energy_tdp_watts", 0.0)),
                     total_energy_j=float(seq["energy_j"]),
-                    mean_power_w=0.0,
+                    mean_power_w=float(seq.get("energy_mean_power_w", 0.0)),
                     energy_per_frame_mj=float(seq.get("energy_per_frame_mj", 0.0)),
-                    peak_cpu_pct=0.0,
-                    mean_cpu_pct=0.0,
+                    peak_cpu_pct=float(seq.get("energy_peak_cpu_pct", 0.0)),
+                    mean_cpu_pct=float(seq.get("energy_mean_cpu_pct", 0.0)),
                 )
 
             seq_results.append(
