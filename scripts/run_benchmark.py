@@ -12,6 +12,11 @@ Usage
         --dataset-name OTB100 \\
         --max-sequences 5
 
+    # Headless smoke test using the built-in synthetic dataset (no download needed):
+    python scripts/run_benchmark.py \\
+        --tracker MOSSE --synthetic \\
+        --synthetic-sequences 5 --synthetic-frames 50
+
     # Installed as a package entry point:
     eovot --config configs/default.yaml
 """
@@ -34,6 +39,7 @@ from eovot.benchmark.engine import BenchmarkEngine
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
 from eovot.datasets.lasot import LaSOTDataset
+from eovot.datasets.synthetic import SyntheticDataset
 from eovot.trackers.registry import TRACKER_REGISTRY
 
 
@@ -51,6 +57,7 @@ DATASET_REGISTRY: Dict[str, Any] = {
     "OTBDataset": OTBDataset,
     "GOT10kDataset": GOT10kDataset,
     "LaSOTDataset": LaSOTDataset,
+    "SyntheticDataset": SyntheticDataset,
 }
 
 
@@ -66,17 +73,29 @@ def _load_config(path: str) -> Dict:
 
 def _config_from_args(args: argparse.Namespace) -> Dict:
     """Build a minimal config dict from CLI arguments."""
+    if args.synthetic:
+        dataset_cfg: Dict[str, Any] = {
+            "name": args.dataset_name or "Synthetic",
+            "loader": "SyntheticDataset",
+            "num_sequences": args.synthetic_sequences,
+            "num_frames": args.synthetic_frames,
+            "frame_size": args.synthetic_size,
+            "motion": args.synthetic_motion,
+            "max_sequences": args.max_sequences,
+        }
+    else:
+        dataset_cfg = {
+            "name": args.dataset_name,
+            "loader": "OTBDataset",
+            "root": args.dataset_root,
+            "max_sequences": args.max_sequences,
+        }
     return {
         "experiment": {
             "name": "cli-run",
             "output_dir": args.output_dir,
         },
-        "dataset": {
-            "name": args.dataset_name,
-            "loader": "OTBDataset",
-            "root": args.dataset_root,
-            "max_sequences": args.max_sequences,
-        },
+        "dataset": dataset_cfg,
         "tracker": {
             "name": args.tracker,
             "params": {},
@@ -100,12 +119,21 @@ def run_from_config(cfg: Dict) -> None:
     """Execute a benchmark run described by *cfg*."""
     # --- Dataset ---
     ds_cfg = cfg["dataset"]
-    loader_cls = DATASET_REGISTRY.get(ds_cfg.get("loader", "OTBDataset"))
-    if loader_cls is None:
-        print(f"[ERROR] Unknown dataset loader: {ds_cfg['loader']}", file=sys.stderr)
-        sys.exit(1)
     loader_name = ds_cfg.get("loader", "OTBDataset")
-    if loader_name in ("GOT10kDataset", "LaSOTDataset"):
+    loader_cls = DATASET_REGISTRY.get(loader_name)
+    if loader_cls is None:
+        print(f"[ERROR] Unknown dataset loader: {loader_name}", file=sys.stderr)
+        sys.exit(1)
+
+    if loader_name == "SyntheticDataset":
+        frame_size = ds_cfg.get("frame_size", [320, 240])
+        dataset = loader_cls(
+            num_sequences=ds_cfg.get("num_sequences", 10),
+            num_frames=ds_cfg.get("num_frames", 100),
+            frame_size=tuple(frame_size) if not isinstance(frame_size, tuple) else frame_size,
+            motion=ds_cfg.get("motion", "linear"),
+        )
+    elif loader_name in ("GOT10kDataset", "LaSOTDataset"):
         dataset = loader_cls(
             ds_cfg["root"],
             split=ds_cfg.get("split", "val"),
@@ -208,6 +236,25 @@ def _build_parser() -> argparse.ArgumentParser:
                             "Enable CPU energy estimation with this TDP (Watts). "
                             "E.g. 6.0 for Raspberry Pi 4, 15.0 for a laptop."
                         ))
+
+    # Synthetic dataset mode — allows headless evaluation without any download
+    syn = parser.add_argument_group(
+        "synthetic dataset",
+        "Use the built-in procedural dataset instead of a file-based one. "
+        "Pass --synthetic to activate; no --dataset-root required.",
+    )
+    syn.add_argument("--synthetic", action="store_true",
+                     help="Evaluate against the synthetic dataset (no download needed).")
+    syn.add_argument("--synthetic-sequences", type=int, default=5, metavar="N",
+                     help="Number of synthetic sequences to generate (default: 5).")
+    syn.add_argument("--synthetic-frames", type=int, default=50, metavar="N",
+                     help="Frames per synthetic sequence (default: 50).")
+    syn.add_argument("--synthetic-size", type=int, nargs=2, default=[320, 240],
+                     metavar=("W", "H"),
+                     help="Frame size in pixels — width height (default: 320 240).")
+    syn.add_argument("--synthetic-motion", default="linear",
+                     choices=["linear", "circular", "random"],
+                     help="Target motion pattern (default: linear).")
     return parser
 
 
@@ -217,7 +264,7 @@ def main() -> None:
 
     if args.config:
         cfg = _load_config(args.config)
-    elif args.dataset_root:
+    elif args.synthetic or args.dataset_root:
         cfg = _config_from_args(args)
     else:
         parser.print_help()
