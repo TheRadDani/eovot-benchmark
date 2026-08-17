@@ -169,7 +169,13 @@ class BenchmarkResult:
                 "latency_p99_ms": round(p.latency_p99_ms, 3),
                 "latency_cv": round(p.latency_cv, 6),
                 "peak_memory_mb": round(p.peak_memory_mb, 2),
+                "warmup_frame_count": p.warmup_frame_count,
+                "steady_state_latency_mean_ms": round(p.steady_state_latency_mean_ms, 3),
+                "steady_state_fps": round(p.steady_state_fps, 2),
             }
+            if p.budget_ms is not None:
+                entry["latency_budget_ms"] = round(p.budget_ms, 3)
+                entry["budget_violation_rate"] = round(p.budget_violation_rate, 6)
             if r.accuracy_metrics is not None:
                 entry["success_auc"] = round(r.accuracy_metrics.success_auc, 4)
                 entry["precision_auc"] = round(r.accuracy_metrics.precision_auc, 4)
@@ -286,6 +292,15 @@ class BenchmarkResult:
             lat_p99: float = float(seq.get("latency_p99_ms", lat_ms))
             lat_cv: float = float(seq.get("latency_cv", 0.0))
 
+            warmup_cnt: int = int(seq.get("warmup_frame_count", 0))
+            ss_lat: float = float(seq.get("steady_state_latency_mean_ms", lat_ms))
+            ss_fps: float = float(seq.get("steady_state_fps",
+                                          1_000.0 / ss_lat if ss_lat > 0 else fps))
+            budget_ms_val: Optional[float] = (
+                float(seq["latency_budget_ms"]) if "latency_budget_ms" in seq else None
+            )
+            budget_viol: float = float(seq.get("budget_violation_rate", 0.0))
+
             profiling = ProfilingResult(
                 tracker_name=tracker_name,
                 frame_count=len(ious),
@@ -296,6 +311,11 @@ class BenchmarkResult:
                 latency_p99_ms=lat_p99,
                 latency_cv=lat_cv,
                 peak_memory_mb=mem_mb,
+                warmup_frame_count=warmup_cnt,
+                steady_state_latency_mean_ms=ss_lat,
+                steady_state_fps=ss_fps,
+                budget_ms=budget_ms_val,
+                budget_violation_rate=budget_viol,
             )
 
             accuracy: Optional[AccuracyMetrics] = None
@@ -355,12 +375,32 @@ class BenchmarkEngine:
             value (Watts).  Set to the device's CPU TDP for meaningful
             estimates (e.g. ``6.0`` for Raspberry Pi 4, ``15.0`` for a
             laptop).  Default: ``None`` (energy profiling disabled).
+        warmup_frames: Number of initial frames per sequence to exclude from
+            steady-state latency statistics.  Warm-up frames are still tracked
+            and counted but routed to a separate bucket so that JIT compilation
+            and cache-cold effects do not inflate reported latency.
+            Published benchmarks typically use 3–10 warm-up frames.
+            Default: ``0`` (all frames included — backward compatible).
+        latency_budget_ms: Optional real-time budget in milliseconds per frame
+            (e.g. ``33.3`` for 30 FPS).  When set, ``ProfilingResult`` includes
+            ``budget_violation_rate`` — the fraction of steady-state frames that
+            exceeded this threshold.  Useful for SLA-style deployment decisions.
+            Default: ``None`` (budget tracking disabled).
     """
 
-    def __init__(self, verbose: bool = True, tdp_watts: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        verbose: bool = True,
+        tdp_watts: Optional[float] = None,
+        warmup_frames: int = 0,
+        latency_budget_ms: Optional[float] = None,
+    ) -> None:
         self.verbose = verbose
         self._metrics = MetricsEngine()
-        self._profiler = Profiler()
+        self._profiler = Profiler(
+            warmup_frames=warmup_frames,
+            budget_ms=latency_budget_ms,
+        )
         self._energy_profiler: Optional[EnergyProfiler] = (
             EnergyProfiler(tdp_watts=tdp_watts) if tdp_watts is not None else None
         )
