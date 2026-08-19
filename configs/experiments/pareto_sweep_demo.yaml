@@ -1,0 +1,43 @@
+# Pareto Sweep Demo Config
+# ----------------------------------------
+# Sweeps (skip_rate × scale_factor) for KCF on the synthetic dataset
+# to demonstrate the accuracy–efficiency trade-off surface.
+#
+# Usage:
+#   python scripts/pareto_sweep.py --synthetic \
+#       --tracker KCF \
+#       --skip-rates 1 2 3 4 \
+#       --scale-factors 1.0 0.75 0.5 \
+#       --output results/pareto_sweep_kcf.csv
+#
+# The output CSV includes columns: skip_rate, scale_factor, mean_iou,
+# success_auc, mean_fps, peak_memory_mb, ees, on_pareto_front.
+# Pareto-optimal rows (on_pareto_front=1) represent the best
+# accuracy–efficiency operating points for edge deployment.
+
+experiment:
+  name: "pareto-sweep-demo"
+  description: >
+    Pareto sweep over frame-skipping and resolution-scaling hyperparameters
+    for KCF on the synthetic dataset. Identifies the optimal operating points
+    for edge deployment under memory and throughput constraints.
+
+sweep:
+  tracker: "KCF"
+  tracker_params:
+    learning_rate: 0.075
+    padding: 1.5
+  skip_rates: [1, 2, 3, 4]
+  scale_factors: [1.0, 0.75, 0.50]
+  memory_budget_mb: 512
+
+dataset:
+  loader: "SyntheticDataset"
+  name: "Synthetic-Linear"
+  num_sequences: 10
+  num_frames: 100
+  frame_size: [320, 240]
+  motion: "linear"
+
+output:
+  csv: "results/pareto_sweep_kcf.csv"
