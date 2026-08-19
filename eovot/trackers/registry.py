@@ -25,6 +25,7 @@ from typing import Any, Dict, Type
 from .base import BaseTracker
 from .camshift import CamShiftTracker
 from .csrt import CSRTTracker
+from .dcf import DCFTracker
 from .kcf import KCFTracker
 from .lk_optical_flow import LKOpticalFlowTracker
 from .median_flow import MedianFlowTracker
@@ -36,6 +37,7 @@ from .mosse import MOSSETracker
 TRACKER_REGISTRY: Dict[str, Type[BaseTracker]] = {
     "MOSSE": MOSSETracker,
     "KCF": KCFTracker,
+    "DCF": DCFTracker,
     "CSRT": CSRTTracker,
     "MIL": MILTracker,
     "MedianFlow": MedianFlowTracker,

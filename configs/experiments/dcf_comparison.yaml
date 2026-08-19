@@ -1,0 +1,55 @@
+# DCF vs Classical Trackers Comparison
+# ----------------------------------------
+# Compares the multi-channel DCF tracker against MOSSE and KCF on the
+# synthetic dataset to demonstrate the accuracy improvement from
+# gradient-feature augmentation.
+#
+# Usage:
+#   python scripts/run_experiment.py --config configs/experiments/dcf_comparison.yaml
+#
+# Expected results (synthetic-linear, 100 sequences, 100 frames):
+#   DCF:   mIoU ≈ 0.55–0.70, FPS ≈ 250–400
+#   KCF:   mIoU ≈ 0.45–0.60, FPS ≈ 250–400
+#   MOSSE: mIoU ≈ 0.40–0.55, FPS ≈ 500–800
+
+experiment:
+  name: "dcf-classical-comparison"
+  output_dir: "results/dcf_comparison/"
+  seed: 42
+  description: >
+    Benchmark comparing the DCF multi-channel correlation filter against
+    MOSSE (grayscale intensity) and KCF (Gaussian kernel) baselines.
+    All trackers are pure NumPy/OpenCV — no GPU required.
+
+dataset:
+  loader: "SyntheticDataset"
+  name: "Synthetic-Linear"
+  num_sequences: 10
+  num_frames: 100
+  frame_size: [320, 240]
+  motion: "linear"
+
+trackers:
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+      sigma: 2.0
+
+  - name: KCF
+    params:
+      learning_rate: 0.075
+      padding: 1.5
+
+  - name: DCF
+    params:
+      learning_rate: 0.10
+      padding: 1.5
+      lambda_: 0.0001
+
+benchmark:
+  verbose: true
+  tdp_watts: null    # set to your CPU TDP for energy estimates (e.g. 6.0 for RPi4)
+
+reporting:
+  formats: ["json", "csv"]
+  print_summary: true
