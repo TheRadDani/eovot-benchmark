@@ -1,24 +1,24 @@
-# DCF vs Classical Trackers Comparison
-# ----------------------------------------
-# Compares the multi-channel DCF tracker against MOSSE and KCF on the
-# synthetic dataset to demonstrate the accuracy improvement from
-# gradient-feature augmentation.
+# GradCorr vs Classical Trackers Comparison
+# ------------------------------------------
+# Compares the GradCorr gradient-channel correlation filter tracker against
+# MOSSE and KCF on the synthetic dataset to demonstrate the accuracy
+# improvement from multi-channel dense gradient features.
 #
 # Usage:
 #   python scripts/run_experiment.py --config configs/experiments/dcf_comparison.yaml
 #
-# Expected results (synthetic-linear, 100 sequences, 100 frames):
-#   DCF:   mIoU ≈ 0.55–0.70, FPS ≈ 250–400
-#   KCF:   mIoU ≈ 0.45–0.60, FPS ≈ 250–400
-#   MOSSE: mIoU ≈ 0.40–0.55, FPS ≈ 500–800
+# Expected results (synthetic-linear, 10 sequences, 100 frames):
+#   GradCorr: mIoU ≈ 0.55–0.70, FPS ≈ 200–400
+#   KCF:      mIoU ≈ 0.45–0.60, FPS ≈ 250–400
+#   MOSSE:    mIoU ≈ 0.40–0.55, FPS ≈ 500–800
 
 experiment:
-  name: "dcf-classical-comparison"
-  output_dir: "results/dcf_comparison/"
+  name: "gradcorr-classical-comparison"
+  output_dir: "results/gradcorr_comparison/"
   seed: 42
   description: >
-    Benchmark comparing the DCF multi-channel correlation filter against
-    MOSSE (grayscale intensity) and KCF (Gaussian kernel) baselines.
+    Benchmark comparing the GradCorr multi-channel gradient correlation filter
+    against MOSSE (grayscale intensity) and KCF (Gaussian kernel) baselines.
     All trackers are pure NumPy/OpenCV — no GPU required.
 
 dataset:
@@ -40,7 +40,7 @@ trackers:
       learning_rate: 0.075
       padding: 1.5
 
-  - name: DCF
+  - name: GradCorr
     params:
       learning_rate: 0.10
       padding: 1.5
