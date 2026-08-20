@@ -116,6 +116,20 @@ class BenchmarkResult:
                 if r.accuracy_metrics is not None]
         return float(np.mean(aucs)) if aucs else None
 
+    @property
+    def mean_sr_50(self) -> Optional[float]:
+        """Mean SR@0.50 across all sequences — GOT-10k protocol metric."""
+        vals = [r.accuracy_metrics.sr_50 for r in self.sequence_results
+                if r.accuracy_metrics is not None]
+        return float(np.mean(vals)) if vals else None
+
+    @property
+    def mean_sr_75(self) -> Optional[float]:
+        """Mean SR@0.75 across all sequences — GOT-10k protocol metric."""
+        vals = [r.accuracy_metrics.sr_75 for r in self.sequence_results
+                if r.accuracy_metrics is not None]
+        return float(np.mean(vals)) if vals else None
+
     def summary(self) -> Dict:
         d: Dict = {
             "tracker": self.tracker_name,
@@ -137,6 +151,12 @@ class BenchmarkResult:
         npauc = self.mean_normalized_precision_auc
         if npauc is not None:
             d["normalized_precision_auc"] = round(npauc, 4)
+        sr50 = self.mean_sr_50
+        if sr50 is not None:
+            d["sr_50"] = round(sr50, 4)
+        sr75 = self.mean_sr_75
+        if sr75 is not None:
+            d["sr_75"] = round(sr75, 4)
         e_total = self.total_energy_j
         if e_total is not None:
             d["total_energy_j"] = round(e_total, 4)
@@ -174,6 +194,8 @@ class BenchmarkResult:
                 entry["success_auc"] = round(r.accuracy_metrics.success_auc, 4)
                 entry["precision_auc"] = round(r.accuracy_metrics.precision_auc, 4)
                 entry["normalized_precision_auc"] = round(r.accuracy_metrics.normalized_precision_auc, 4)
+                entry["sr_50"] = round(r.accuracy_metrics.sr_50, 4)
+                entry["sr_75"] = round(r.accuracy_metrics.sr_75, 4)
             if r.energy is not None:
                 entry["energy_j"] = round(r.energy.total_energy_j, 6)
                 entry["energy_per_frame_mj"] = round(r.energy.energy_per_frame_mj, 4)
@@ -305,6 +327,8 @@ class BenchmarkResult:
                     success_auc=float(seq["success_auc"]),
                     precision_auc=float(seq.get("precision_auc", 0.0)),
                     normalized_precision_auc=float(seq.get("normalized_precision_auc", 0.0)),
+                    sr_50=float(seq.get("sr_50", 0.0)),
+                    sr_75=float(seq.get("sr_75", 0.0)),
                 )
 
             energy: Optional[EnergyResult] = None

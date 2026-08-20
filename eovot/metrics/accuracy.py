@@ -75,7 +75,10 @@ class AccuracyMetrics:
     """Scalar accuracy summary for a tracker on a dataset or sequence."""
 
     mean_iou: float
-    """Mean IoU across all evaluated frames."""
+    """Mean IoU across all evaluated frames.
+
+    Equivalent to **Average Overlap (AO)** in the GOT-10k evaluation protocol.
+    """
 
     success_auc: float
     """Area Under the Success Curve (IoU thresholds 0 → 1)."""
@@ -92,10 +95,28 @@ class AccuracyMetrics:
     (centre error < 20 % of target diameter).  Range: ``[0, 1]``.
     """
 
+    sr_50: float = 0.0
+    """Success Rate at IoU threshold 0.50 — **SR@0.50** in the GOT-10k protocol.
+
+    Fraction of frames where IoU ≥ 0.50.  Together with :attr:`sr_75` this
+    distinguishes trackers that often "touch" the target (AO ≈ 0.40) from
+    those that consistently overlap it (SR@0.50 high).  Range: ``[0, 1]``.
+    """
+
+    sr_75: float = 0.0
+    """Success Rate at IoU threshold 0.75 — **SR@0.75** in the GOT-10k protocol.
+
+    Fraction of frames where IoU ≥ 0.75.  A high SR@0.75 indicates the
+    tracker maintains tight localisation throughout the sequence, the most
+    demanding accuracy bar in standard VOT evaluation.  Range: ``[0, 1]``.
+    """
+
     def __str__(self) -> str:
         return (
             f"AccuracyMetrics("
-            f"mIoU={self.mean_iou:.4f}, "
+            f"AO={self.mean_iou:.4f}, "
+            f"SR@0.50={self.sr_50:.4f}, "
+            f"SR@0.75={self.sr_75:.4f}, "
             f"success_AUC={self.success_auc:.4f}, "
             f"precision_AUC={self.precision_auc:.4f}, "
             f"norm_precision_AUC={self.normalized_precision_auc:.4f})"
@@ -165,6 +186,28 @@ class MetricsEngine:
         pc = p[:, :2] + p[:, 2:] / 2.0   # predicted centres (N, 2)
         gc = g[:, :2] + g[:, 2:] / 2.0   # GT centres (N, 2)
         return np.sqrt(np.sum((pc - gc) ** 2, axis=1))
+
+    def success_rate_at_threshold(
+        self, ious: np.ndarray, threshold: float
+    ) -> float:
+        """Fraction of frames with IoU ≥ *threshold* (GOT-10k SR metric).
+
+        This is the standard GOT-10k **SR@t** metric:
+
+        * ``SR@0.50`` — threshold = 0.50, indicating coarse localisation.
+        * ``SR@0.75`` — threshold = 0.75, indicating tight localisation.
+
+        Args:
+            ious:      Per-frame IoU array, shape ``(N,)``.
+            threshold: IoU threshold in ``[0, 1]``.
+
+        Returns:
+            Fraction of frames satisfying the threshold, in ``[0, 1]``.
+            Returns ``0.0`` for empty input.
+        """
+        if len(ious) == 0:
+            return 0.0
+        return float((np.asarray(ious) >= threshold).mean())
 
     def success_curve(
         self,
@@ -293,9 +336,14 @@ class MetricsEngine:
         thr_np, npr = self.normalized_precision_curve(preds, gts)
         np_auc = float(_trapz(npr, thr_np) / thr_np[-1]) if thr_np[-1] > 0 else 0.0
 
+        sr_50 = self.success_rate_at_threshold(ious, 0.50)
+        sr_75 = self.success_rate_at_threshold(ious, 0.75)
+
         return AccuracyMetrics(
             mean_iou=float(ious.mean()),
             success_auc=success_auc,
             precision_auc=prec_auc,
             normalized_precision_auc=np_auc,
+            sr_50=sr_50,
+            sr_75=sr_75,
         )
