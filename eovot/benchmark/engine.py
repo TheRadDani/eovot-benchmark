@@ -11,6 +11,7 @@ import numpy as np
 
 from ..datasets.base import BaseDataset, Sequence
 from ..metrics.accuracy import AccuracyMetrics, MetricsEngine
+from ..metrics.temporal import TemporalConsistencyAnalyzer, TemporalConsistencyResult
 from ..profiling.energy import EnergyProfiler, EnergyResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
@@ -26,6 +27,7 @@ class SequenceResult:
     center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
     energy: Optional[EnergyResult] = None          # energy estimate; None when TDP not configured
     accuracy_metrics: Optional[AccuracyMetrics] = None  # success AUC, precision AUC
+    temporal: Optional[TemporalConsistencyResult] = None  # smoothness, jitter, VOR
 
     @property
     def mean_iou(self) -> float:
@@ -116,6 +118,35 @@ class BenchmarkResult:
                 if r.accuracy_metrics is not None]
         return float(np.mean(aucs)) if aucs else None
 
+    @property
+    def mean_smoothness_score(self) -> Optional[float]:
+        """Mean temporal smoothness score across all sequences, or ``None`` if not computed.
+
+        Higher is smoother.  Range: ``(0, 1]``.
+        A score of 1.0 indicates perfectly jitter-free, outlier-free trajectories.
+        """
+        scores = [r.temporal.smoothness_score for r in self.sequence_results
+                  if r.temporal is not None]
+        return float(np.mean(scores)) if scores else None
+
+    @property
+    def mean_position_jitter(self) -> Optional[float]:
+        """Mean normalised position jitter across all sequences, or ``None``.
+
+        Lower values indicate smoother predicted trajectories.  The metric is
+        scale-invariant (normalised by mean box diagonal).
+        """
+        vals = [r.temporal.position_jitter for r in self.sequence_results
+                if r.temporal is not None]
+        return float(np.mean(vals)) if vals else None
+
+    @property
+    def mean_scale_jitter(self) -> Optional[float]:
+        """Mean scale jitter (std of consecutive area ratios) across all sequences."""
+        vals = [r.temporal.scale_jitter for r in self.sequence_results
+                if r.temporal is not None]
+        return float(np.mean(vals)) if vals else None
+
     def summary(self) -> Dict:
         d: Dict = {
             "tracker": self.tracker_name,
@@ -143,6 +174,15 @@ class BenchmarkResult:
         e_frame = self.mean_energy_per_frame_mj
         if e_frame is not None:
             d["mean_energy_per_frame_mj"] = round(e_frame, 4)
+        smoothness = self.mean_smoothness_score
+        if smoothness is not None:
+            d["mean_smoothness_score"] = round(smoothness, 4)
+        jitter = self.mean_position_jitter
+        if jitter is not None:
+            d["mean_position_jitter"] = round(jitter, 6)
+        scale_jitter = self.mean_scale_jitter
+        if scale_jitter is not None:
+            d["mean_scale_jitter"] = round(scale_jitter, 6)
         return d
 
     def to_dict(self) -> Dict:
@@ -154,7 +194,8 @@ class BenchmarkResult:
 
         All profiling tail-latency fields (p95, p99, std, CV) and all energy
         fields (TDP, mean power, CPU utilisation) are preserved so that
-        :meth:`from_dict` can reconstruct them exactly.
+        :meth:`from_dict` can reconstruct them exactly.  Temporal consistency
+        fields (smoothness score, jitter, VOR) are also serialised when present.
         """
         sequences = []
         for r in self.sequence_results:
@@ -181,6 +222,12 @@ class BenchmarkResult:
                 entry["energy_mean_power_w"] = round(r.energy.mean_power_w, 4)
                 entry["energy_peak_cpu_pct"] = round(r.energy.peak_cpu_pct, 2)
                 entry["energy_mean_cpu_pct"] = round(r.energy.mean_cpu_pct, 2)
+            if r.temporal is not None:
+                entry["smoothness_score"] = round(r.temporal.smoothness_score, 4)
+                entry["position_jitter"] = round(r.temporal.position_jitter, 6)
+                entry["scale_jitter"] = round(r.temporal.scale_jitter, 6)
+                entry["velocity_outlier_ratio"] = round(r.temporal.velocity_outlier_ratio, 4)
+                entry["mean_velocity_px"] = round(r.temporal.mean_velocity_px, 3)
             # Per-frame arrays enable full success/precision curve plots from JSON.
             if r.ious is not None and len(r.ious) > 0:
                 entry["ious"] = [round(float(v), 6) for v in r.ious]
@@ -198,6 +245,8 @@ class BenchmarkResult:
         )
         if "total_energy_j" in s:
             base += f"  energy={s['total_energy_j']} J"
+        if "mean_smoothness_score" in s:
+            base += f"  smoothness={s['mean_smoothness_score']}"
         return base
 
     # ------------------------------------------------------------------
@@ -231,8 +280,8 @@ class BenchmarkResult:
         """Deserialise a :class:`BenchmarkResult` from a JSON file.
 
         Reconstructs all per-sequence IoU arrays, profiling summaries,
-        accuracy metrics, and (when present) energy estimates from the file
-        written by :meth:`save` or :meth:`to_dict`.
+        accuracy metrics, energy estimates, and temporal consistency results
+        from the file written by :meth:`save` or :meth:`to_dict`.
 
         Args:
             path: Path to the JSON file produced by :meth:`save`.
@@ -265,6 +314,7 @@ class BenchmarkResult:
         from ..profiling.profiler import ProfilingResult
         from ..profiling.energy import EnergyResult
         from ..metrics.accuracy import AccuracyMetrics
+        from ..metrics.temporal import TemporalConsistencyResult
 
         summary = d["summary"]
         tracker_name: str = summary.get("tracker") or summary.get("tracker_name", "unknown")
@@ -320,6 +370,19 @@ class BenchmarkResult:
                     mean_cpu_pct=float(seq.get("energy_mean_cpu_pct", 0.0)),
                 )
 
+            temporal: Optional[TemporalConsistencyResult] = None
+            if "smoothness_score" in seq:
+                temporal = TemporalConsistencyResult(
+                    tracker_name=tracker_name,
+                    sequence_name=seq_name,
+                    position_jitter=float(seq.get("position_jitter", 0.0)),
+                    scale_jitter=float(seq.get("scale_jitter", 0.0)),
+                    velocity_outlier_ratio=float(seq.get("velocity_outlier_ratio", 0.0)),
+                    smoothness_score=float(seq["smoothness_score"]),
+                    mean_velocity_px=float(seq.get("mean_velocity_px", 0.0)),
+                    num_frames=int(seq.get("num_frames", len(ious))),
+                )
+
             seq_results.append(
                 SequenceResult(
                     sequence_name=seq_name,
@@ -328,6 +391,7 @@ class BenchmarkResult:
                     center_distances=dists,
                     energy=energy,
                     accuracy_metrics=accuracy,
+                    temporal=temporal,
                 )
             )
 
@@ -361,6 +425,7 @@ class BenchmarkEngine:
         self.verbose = verbose
         self._metrics = MetricsEngine()
         self._profiler = Profiler()
+        self._temporal_analyzer = TemporalConsistencyAnalyzer()
         self._energy_profiler: Optional[EnergyProfiler] = (
             EnergyProfiler(tdp_watts=tdp_watts) if tdp_watts is not None else None
         )
@@ -392,12 +457,16 @@ class BenchmarkEngine:
                 sauc_str = ""
                 if seq_result.accuracy_metrics is not None:
                     sauc_str = f"  AUC={seq_result.accuracy_metrics.success_auc:.3f}"
+                smooth_str = ""
+                if seq_result.temporal is not None:
+                    smooth_str = f"  S={seq_result.temporal.smoothness_score:.3f}"
                 print(
                     f"  [{idx + 1:>3}/{n}] {seq_result.sequence_name:<30s} "
                     f"mIoU={seq_result.mean_iou:.3f}  "
                     f"FPS={seq_result.profiling.fps:.1f}"
                     f"{sauc_str}"
                     f"{energy_str}"
+                    f"{smooth_str}"
                 )
 
         if self.verbose:
@@ -436,11 +505,20 @@ class BenchmarkEngine:
 
         ious = self._metrics.batch_iou(preds_eval, gt_eval)
 
-        # Vectorised centre-distance computation (replaces element-wise Python loop).
+        # Vectorised centre-distance computation.
         dists = self._metrics.batch_center_distance(preds_eval, gt_eval)
 
         # Full VOT accuracy metrics: success AUC, precision AUC.
         accuracy = self._metrics.compute_all(preds_eval, gt_eval)
+
+        # Temporal consistency: smoothness, jitter, velocity outlier ratio.
+        temporal: Optional[TemporalConsistencyResult] = None
+        if len(preds_eval) >= 2:
+            temporal = self._temporal_analyzer.analyze(
+                preds_eval,
+                tracker_name=tracker.name,
+                sequence_name=seq.name,
+            )
 
         energy: Optional[EnergyResult] = None
         if self._energy_profiler is not None:
@@ -458,4 +536,5 @@ class BenchmarkEngine:
             center_distances=dists,
             energy=energy,
             accuracy_metrics=accuracy,
+            temporal=temporal,
         )
