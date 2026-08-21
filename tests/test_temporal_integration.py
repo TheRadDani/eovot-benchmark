@@ -163,18 +163,16 @@ class TestTemporalWithDifferentTracker:
 
 
 class TestTemporalEdgeCases:
-    def test_single_frame_sequence_no_temporal(self):
-        """Sequences with 1 frame produce no temporal result (need >= 2 predictions)."""
+    def test_two_frame_sequence_no_temporal(self):
+        """A 2-frame sequence has 1 update call → 1 prediction → temporal is None."""
         dataset = SyntheticDataset(
-            num_sequences=1, num_frames=1, seed=0
+            num_sequences=1, num_frames=2, seed=0
         )
         engine = BenchmarkEngine(verbose=False)
-        result = engine.run(MOSSETracker(), dataset, dataset_name="OneFrame")
-        # With only 1 frame, predictions has length 1 — temporal should be None.
+        result = engine.run(MOSSETracker(), dataset, dataset_name="TwoFrame")
+        # len(preds_eval) == 1 < 2, so the engine skips temporal analysis.
         for seq_res in result.sequence_results:
-            # Either None (skipped) or valid — both acceptable.
-            if seq_res.temporal is not None:
-                assert 0.0 < seq_res.temporal.smoothness_score <= 1.0
+            assert seq_res.temporal is None
 
     def test_str_includes_smoothness(self):
         dataset = SyntheticDataset(num_sequences=1, num_frames=20, seed=5)
