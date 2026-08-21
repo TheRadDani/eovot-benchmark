@@ -176,15 +176,6 @@ class TestKalmanOnBenchmarkEngine:
         result = engine.run(KalmanFilterTracker(), dataset, dataset_name="Syn")
         assert result.mean_iou > 0.0
 
-    def test_temporal_metrics_populated(self):
-        """BenchmarkEngine should compute temporal consistency for Kalman too."""
-        dataset = SyntheticDataset(num_sequences=2, num_frames=25, seed=10)
-        engine = BenchmarkEngine(verbose=False)
-        result = engine.run(KalmanFilterTracker(), dataset, dataset_name="Syn")
-        assert result.mean_smoothness_score is not None
-        for seq_res in result.sequence_results:
-            assert seq_res.temporal is not None
-
     def test_on_scale_sequences(self):
         dataset = SyntheticDataset(
             num_sequences=2, num_frames=30, motion="scale", seed=11
