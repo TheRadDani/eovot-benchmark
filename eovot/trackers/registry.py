@@ -1,4 +1,4 @@
-"""Centralized tracker registry for EOVOT.
+"""Centralised tracker registry for EOVOT.
 
 Before this module existed, the mapping from a tracker's string name (as
 used in YAML configs and the CLI) to its concrete class was copy-pasted in
@@ -16,6 +16,7 @@ Example::
     from eovot.trackers.registry import build_tracker
 
     tracker = build_tracker("KCF", learning_rate=0.075)
+    tracker = build_tracker("KalmanFilter", process_noise=0.005)
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from typing import Any, Dict, Type
 from .base import BaseTracker
 from .camshift import CamShiftTracker
 from .csrt import CSRTTracker
+from .kalman import KalmanFilterTracker
 from .kcf import KCFTracker
 from .lk_optical_flow import LKOpticalFlowTracker
 from .median_flow import MedianFlowTracker
@@ -41,6 +43,7 @@ TRACKER_REGISTRY: Dict[str, Type[BaseTracker]] = {
     "MedianFlow": MedianFlowTracker,
     "CamShift": CamShiftTracker,
     "LKOpticalFlow": LKOpticalFlowTracker,
+    "KalmanFilter": KalmanFilterTracker,
 }
 
 # DaSiamRPN / NanoTracker need pre-trained ONNX files the user supplies
@@ -64,7 +67,7 @@ def build_tracker(name: str, **params: Any) -> BaseTracker:
     """Instantiate a registered tracker by name.
 
     Args:
-        name:   Registry key, e.g. ``"KCF"`` or ``"MIL"``.
+        name:   Registry key, e.g. ``"KCF"``, ``"MOSSE"``, or ``"KalmanFilter"``.
         params: Keyword arguments forwarded to the tracker's constructor.
 
     Returns:
