@@ -12,6 +12,7 @@ import numpy as np
 from ..datasets.base import BaseDataset, Sequence
 from ..metrics.accuracy import AccuracyMetrics, MetricsEngine
 from ..profiling.energy import EnergyProfiler, EnergyResult
+from ..profiling.gpu import GPUProfiler, GPUProfilingResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
 
@@ -26,6 +27,7 @@ class SequenceResult:
     center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
     energy: Optional[EnergyResult] = None          # energy estimate; None when TDP not configured
     accuracy_metrics: Optional[AccuracyMetrics] = None  # success AUC, precision AUC
+    gpu_profiling: Optional[GPUProfilingResult] = None  # GPU metrics; None when GPU profiling disabled
 
     @property
     def mean_iou(self) -> float:
@@ -115,6 +117,30 @@ class BenchmarkResult:
         aucs = [r.accuracy_metrics.normalized_precision_auc for r in self.sequence_results
                 if r.accuracy_metrics is not None]
         return float(np.mean(aucs)) if aucs else None
+
+    @property
+    def peak_gpu_memory_mb(self) -> Optional[float]:
+        """Peak VRAM usage across all sequences (MiB), or ``None`` if not profiled."""
+        with_gpu = [r for r in self.sequence_results if r.gpu_profiling is not None]
+        if not with_gpu:
+            return None
+        return float(max(r.gpu_profiling.peak_gpu_memory_mb for r in with_gpu))
+
+    @property
+    def mean_gpu_power_w(self) -> Optional[float]:
+        """Mean GPU power draw across all sequences (Watts), or ``None`` if not profiled."""
+        with_gpu = [r for r in self.sequence_results if r.gpu_profiling is not None]
+        if not with_gpu:
+            return None
+        return float(np.mean([r.gpu_profiling.mean_gpu_power_w for r in with_gpu]))
+
+    @property
+    def total_gpu_energy_j(self) -> Optional[float]:
+        """Sum of per-sequence GPU energy estimates (Joules), or ``None`` if not profiled."""
+        with_gpu = [r for r in self.sequence_results if r.gpu_profiling is not None]
+        if not with_gpu:
+            return None
+        return float(sum(r.gpu_profiling.total_gpu_energy_j for r in with_gpu))
 
     def summary(self) -> Dict:
         d: Dict = {
@@ -355,14 +381,30 @@ class BenchmarkEngine:
             value (Watts).  Set to the device's CPU TDP for meaningful
             estimates (e.g. ``6.0`` for Raspberry Pi 4, ``15.0`` for a
             laptop).  Default: ``None`` (energy profiling disabled).
+        gpu_profiling: If ``True``, enables GPU profiling via
+            :class:`~eovot.profiling.gpu.GPUProfiler`.  When no NVIDIA GPU
+            or ``nvidia-smi`` binary is present, the profiler falls back
+            gracefully and GPU fields in the result are ``0.0``.
+            Default: ``False``.
+        gpu_device_index: CUDA device index to monitor when *gpu_profiling*
+            is ``True``.  Default: ``0``.
     """
 
-    def __init__(self, verbose: bool = True, tdp_watts: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        verbose: bool = True,
+        tdp_watts: Optional[float] = None,
+        gpu_profiling: bool = False,
+        gpu_device_index: int = 0,
+    ) -> None:
         self.verbose = verbose
         self._metrics = MetricsEngine()
         self._profiler = Profiler()
         self._energy_profiler: Optional[EnergyProfiler] = (
             EnergyProfiler(tdp_watts=tdp_watts) if tdp_watts is not None else None
+        )
+        self._gpu_profiler: Optional[GPUProfiler] = (
+            GPUProfiler(device_index=gpu_device_index) if gpu_profiling else None
         )
 
     def run(
@@ -410,6 +452,8 @@ class BenchmarkEngine:
         self._profiler.reset()
         if self._energy_profiler is not None:
             self._energy_profiler.reset()
+        if self._gpu_profiler is not None:
+            self._gpu_profiler.reset()
 
         frames = list(seq)
         gt = seq.ground_truth
@@ -423,10 +467,14 @@ class BenchmarkEngine:
                 self._profiler.start_frame()
                 if self._energy_profiler is not None:
                     self._energy_profiler.start_frame()
+                if self._gpu_profiler is not None:
+                    self._gpu_profiler.start_frame()
                 bbox = tracker.update(frame)
                 self._profiler.end_frame()
                 if self._energy_profiler is not None:
                     self._energy_profiler.end_frame()
+                if self._gpu_profiler is not None:
+                    self._gpu_profiler.end_frame()
                 preds.append(bbox)
 
         preds_arr = np.array(preds, dtype=np.float64)
@@ -449,6 +497,13 @@ class BenchmarkEngine:
             except ValueError:
                 pass  # sequence too short (0 update frames)
 
+        gpu_result: Optional[GPUProfilingResult] = None
+        if self._gpu_profiler is not None:
+            try:
+                gpu_result = self._gpu_profiler.summary(tracker.name)
+            except ValueError:
+                pass  # sequence too short (0 update frames)
+
         return SequenceResult(
             sequence_name=seq.name,
             ious=ious,
@@ -458,4 +513,5 @@ class BenchmarkEngine:
             center_distances=dists,
             energy=energy,
             accuracy_metrics=accuracy,
+            gpu_profiling=gpu_result,
         )
