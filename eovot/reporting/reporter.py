@@ -66,11 +66,14 @@ class BenchmarkReporter:
     def save_csv(self, result: Dict[str, Any], name: str) -> Path:
         """Write per-sequence metrics to a CSV file.
 
-        Columns: ``sequence_name``, ``mean_iou``, ``precision_score``,
-        ``fps``, ``mean_latency_ms``.
+        All fields present in the result are exported: accuracy (mIoU,
+        success AUC, precision AUC, normalized precision AUC), latency
+        statistics (mean, std, p95, p99, CV), memory, and energy fields when
+        available.  Columns are ordered consistently; optional fields are
+        included only when at least one sequence contains them.
 
         Args:
-            result: Output dict from :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
+            result: Output dict from :meth:`~eovot.benchmark.engine.BenchmarkResult.to_dict`.
             name: Base filename without extension.
 
         Returns:
@@ -79,27 +82,134 @@ class BenchmarkReporter:
         path = self.output_dir / f"{name}.csv"
         sequences = result.get("sequences", [])
         if not sequences:
+            path.touch()
             return path
 
-        fieldnames = ["sequence_name", "mean_iou", "precision_score", "fps", "mean_latency_ms"]
+        # Core fields always present.
+        core_fields = [
+            "sequence_name",
+            "mean_iou",
+            "fps",
+            "mean_latency_ms",
+            "latency_std_ms",
+            "latency_p95_ms",
+            "latency_p99_ms",
+            "latency_cv",
+            "peak_memory_mb",
+        ]
+        # Optional fields: include a column only when at least one sequence has it.
+        optional_fields = [
+            "success_auc",
+            "precision_auc",
+            "normalized_precision_auc",
+            "energy_j",
+            "energy_per_frame_mj",
+            "energy_tdp_watts",
+            "energy_mean_power_w",
+        ]
+        present_optional = [
+            f for f in optional_fields if any(f in seq for seq in sequences)
+        ]
+        fieldnames = core_fields + present_optional
+
         with open(path, "w", newline="") as fh:
             writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
             writer.writeheader()
             for seq in sequences:
-                writer.writerow({
+                row: Dict[str, Any] = {
                     "sequence_name": seq.get("sequence_name", ""),
                     "mean_iou": f"{seq.get('mean_iou', 0.0):.4f}",
-                    "precision_score": f"{seq.get('precision_score', 0.0):.4f}",
                     "fps": f"{seq.get('fps', 0.0):.2f}",
                     "mean_latency_ms": f"{seq.get('mean_latency_ms', 0.0):.3f}",
-                })
+                    "latency_std_ms": f"{seq.get('latency_std_ms', 0.0):.3f}",
+                    "latency_p95_ms": f"{seq.get('latency_p95_ms', 0.0):.3f}",
+                    "latency_p99_ms": f"{seq.get('latency_p99_ms', 0.0):.3f}",
+                    "latency_cv": f"{seq.get('latency_cv', 0.0):.6f}",
+                    "peak_memory_mb": f"{seq.get('peak_memory_mb', 0.0):.2f}",
+                }
+                for field in present_optional:
+                    if field in seq:
+                        # Energy values in Joules can be very small; use 6 d.p.
+                        fmt = ".6f" if field in ("energy_j",) else ".4f"
+                        row[field] = f"{seq[field]:{fmt}}"
+                writer.writerow(row)
+        return path
+
+    def save_summary_csv(
+        self, results: List[Dict[str, Any]], name: str = "summary"
+    ) -> Path:
+        """Write a one-row-per-tracker summary CSV for cross-experiment comparison.
+
+        Each row aggregates the scalar summary fields from one tracker run.
+        This is the CSV complement of :meth:`comparison_table`, designed for
+        import into pandas, Excel, or spreadsheet tools.
+
+        Args:
+            results: List of result dicts, one per tracker / dataset combination.
+                Each must match the format produced by
+                :meth:`~eovot.benchmark.engine.BenchmarkResult.to_dict`.
+            name: Base filename without extension. Default: ``"summary"``.
+
+        Returns:
+            :class:`pathlib.Path` of the written ``.csv`` file.
+
+        Example::
+
+            reporter = BenchmarkReporter(output_dir="results/")
+            reporter.save_summary_csv([mosse_dict, kcf_dict], name="classical_trackers")
+        """
+        path = self.output_dir / f"{name}.csv"
+        if not results:
+            path.touch()
+            return path
+
+        summaries = [r.get("summary", {}) for r in results]
+
+        # Determine which optional summary fields are present across all results.
+        core_summary_fields = [
+            "tracker",
+            "dataset",
+            "num_sequences",
+            "mean_iou",
+            "mean_fps",
+            "peak_memory_mb",
+        ]
+        optional_summary_fields = [
+            "mean_center_distance_px",
+            "success_auc",
+            "precision_auc",
+            "normalized_precision_auc",
+            "total_energy_j",
+            "mean_energy_per_frame_mj",
+        ]
+        present_summary_optional = [
+            f for f in optional_summary_fields if any(f in s for s in summaries)
+        ]
+        fieldnames = core_summary_fields + present_summary_optional
+
+        with open(path, "w", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for s in summaries:
+                row: Dict[str, Any] = {
+                    "tracker": s.get("tracker") or s.get("tracker_name", ""),
+                    "dataset": s.get("dataset") or s.get("dataset_name", ""),
+                    "num_sequences": s.get("num_sequences", ""),
+                    "mean_iou": f"{s.get('mean_iou', 0.0):.4f}",
+                    "mean_fps": f"{s.get('mean_fps', 0.0):.2f}",
+                    "peak_memory_mb": f"{s.get('peak_memory_mb', 0.0):.2f}",
+                }
+                for field in present_summary_optional:
+                    if field in s:
+                        row[field] = f"{s[field]:.4f}"
+                writer.writerow(row)
         return path
 
     def save_all(self, result: Dict[str, Any], name: str) -> Dict[str, Path]:
         """Save JSON and CSV and return a mapping of format → path.
 
         Args:
-            result: Output dict from :meth:`~eovot.benchmark.engine.BenchmarkEngine.run`.
+            result: Output dict from :meth:`~eovot.benchmark.engine.BenchmarkResult.to_dict`.
             name: Base filename prefix.
 
         Returns:
