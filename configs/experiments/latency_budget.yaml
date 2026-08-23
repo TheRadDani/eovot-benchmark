@@ -1,0 +1,50 @@
+# Latency budget analysis experiment configuration.
+#
+# This config evaluates whether classical trackers can sustain common edge
+# deployment frame rates (15, 24, 30, 60 FPS) using the LatencyBudgetAnalyzer.
+#
+# Usage:
+#   python scripts/analyze_latency_budget.py \
+#       results/MOSSE-Synthetic.json results/KCF-Synthetic.json \
+#       --fps 15 24 30 60 \
+#       --output results/latency_budget_report.md
+#
+# Run the benchmark first to produce the JSON result files:
+#   python scripts/run_benchmark.py \
+#       --tracker MOSSE --dataset synthetic --max-sequences 20 \
+#       --output-dir results/
+
+experiment:
+  name: latency_budget_analysis
+  description: >
+    Evaluate real-time deployment feasibility of classical trackers by checking
+    whether their measured latency distributions fit within frame-rate deadlines.
+
+dataset:
+  type: synthetic
+  num_sequences: 20
+  seed: 42
+
+trackers:
+  - MOSSE
+  - KCF
+  - CSRT
+  - MedianFlow
+  - CamShift
+
+latency_budget:
+  # Target frame rates to evaluate (frames per second)
+  target_fps:
+    - 15    # Low-power surveillance, slow-motion edge cameras
+    - 24    # Cinematic frame rate (common in video analytics)
+    - 30    # Standard webcam / RGB-D stream rate
+    - 60    # High-frequency robotics and UAV control loops
+
+  # Use worst-case sequence (true) or cross-sequence mean (false)
+  # Set true for conservative deployment certification, false for
+  # representative average-case analysis.
+  worst_case: false
+
+output:
+  result_dir: results/
+  report_file: results/latency_budget_report.md
