@@ -23,6 +23,8 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+from ..utils.bbox_utils import batch_giou as _batch_giou
+
 # Bounding box: (x, y, width, height)
 BBox = Tuple[float, float, float, float]
 
@@ -146,6 +148,26 @@ class MetricsEngine:
 
         valid = (p[:, 2] > 0) & (p[:, 3] > 0) & (g[:, 2] > 0) & (g[:, 3] > 0) & (union > 0)
         return np.where(valid, inter / union, 0.0)
+
+    def batch_giou(self, preds: np.ndarray, gts: np.ndarray) -> np.ndarray:
+        """Vectorised per-frame Generalized IoU (GIoU) values in ``[-1, 1]``.
+
+        GIoU (Rezatofighi et al., CVPR 2019) extends IoU with a penalty for
+        the empty space in the smallest enclosing axis-aligned box.  Unlike
+        IoU — which saturates at zero whenever two boxes are disjoint —
+        GIoU keeps decreasing smoothly as the boxes drift further apart,
+        so tail-frame localisation quality remains measurable even after a
+        tracker loses the target.  Delegates to :func:`eovot.utils.batch_giou`
+        so the same primitive is available outside the metrics engine.
+
+        Args:
+            preds: ``(N, 4)`` array of predicted boxes ``(x, y, w, h)``.
+            gts:   ``(N, 4)`` array of ground-truth boxes ``(x, y, w, h)``.
+
+        Returns:
+            ``(N,)`` float64 array of GIoU values in ``[-1, 1]``.
+        """
+        return _batch_giou(preds, gts)
 
     def batch_center_distance(self, preds: np.ndarray, gts: np.ndarray) -> np.ndarray:
         """Vectorised per-frame centre-to-centre Euclidean distance (pixels).
