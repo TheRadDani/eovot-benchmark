@@ -285,3 +285,54 @@ class RobustnessAnalyzer:
                 "mean_recovery_lag_frames": round(mean_lag, 2),
             },
         }
+
+    # ------------------------------------------------------------------
+    # Reporting helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def to_markdown_table(aggregates: List[Dict]) -> str:
+        """Format a list of per-tracker aggregate dicts as a Markdown table.
+
+        Args:
+            aggregates: List of ``"aggregate"`` dicts returned by
+                :meth:`analyze_benchmark`, one per tracker.  Rows are ranked
+                by mean EAO in descending order — the best-EAO tracker first.
+
+        Returns:
+            Multi-line Markdown table string ready to embed in a report.
+
+        Example::
+
+            analyzer = RobustnessAnalyzer()
+            aggregates = []
+            for res in benchmark_results:
+                seq_ious = {r.sequence_name: r.ious for r in res.sequence_results}
+                aggregates.append(
+                    analyzer.analyze_benchmark(seq_ious, tracker_name=res.tracker_name)["aggregate"]
+                )
+            print(analyzer.to_markdown_table(aggregates))
+        """
+        if not aggregates:
+            return "_No tracker aggregates to display._\n"
+
+        rows = sorted(
+            aggregates, key=lambda a: a.get("mean_eao", 0.0), reverse=True
+        )
+
+        lines = [
+            "| Rank | Tracker | Sequences | Failures | Failures/Seq | EAO | Survival | Recovery Lag (fr) |",
+            "|------|---------|----------:|---------:|-------------:|----:|---------:|------------------:|",
+        ]
+        for rank, agg in enumerate(rows, start=1):
+            lines.append(
+                f"| {rank} "
+                f"| {agg.get('tracker_name', '?')} "
+                f"| {int(agg.get('num_sequences', 0))} "
+                f"| {int(agg.get('total_failures', 0))} "
+                f"| {float(agg.get('mean_failures_per_sequence', 0.0)):.2f} "
+                f"| {float(agg.get('mean_eao', 0.0)):.4f} "
+                f"| {float(agg.get('mean_survival_rate', 0.0)):.4f} "
+                f"| {float(agg.get('mean_recovery_lag_frames', 0.0)):.1f} |"
+            )
+        return "\n".join(lines)
