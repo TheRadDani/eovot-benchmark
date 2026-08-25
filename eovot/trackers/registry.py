@@ -30,6 +30,7 @@ from .lk_optical_flow import LKOpticalFlowTracker
 from .median_flow import MedianFlowTracker
 from .mil import MILTracker
 from .mosse import MOSSETracker
+from .particle_filter import ParticleFilterTracker
 
 # Trackers that ship with plain opencv-python and require no external model
 # files — always safe to register eagerly.
@@ -41,6 +42,7 @@ TRACKER_REGISTRY: Dict[str, Type[BaseTracker]] = {
     "MedianFlow": MedianFlowTracker,
     "CamShift": CamShiftTracker,
     "LKOpticalFlow": LKOpticalFlowTracker,
+    "ParticleFilter": ParticleFilterTracker,
 }
 
 # DaSiamRPN / NanoTracker need pre-trained ONNX files the user supplies
