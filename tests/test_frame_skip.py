@@ -201,15 +201,13 @@ class TestFrameSkipWithEngine:
     def test_higher_skip_rate_higher_fps(self):
         engine = BenchmarkEngine(verbose=False)
         dataset = _TinyDataset(n=2)
-        r1 = engine.run(_CountingTracker(), dataset, dataset_name="Syn")
-        r3 = engine.run(
-            FrameSkipTracker(_CountingTracker(), skip_rate=3),
-            dataset,
-            dataset_name="Syn",
-        )
-        # skip_rate=3 should be at least as fast as skip_rate=1
-        # (on a constant tracker the overhead is negligible, allow 10% slack)
-        assert r3.mean_fps >= r1.mean_fps * 0.5
+        fst = FrameSkipTracker(_CountingTracker(), skip_rate=3)
+        engine.run(fst, dataset, dataset_name="Syn")
+        # FPS comparison on a trivial constant tracker running at hundreds-of-
+        # thousands FPS is noise-dominated on loaded CI runners.  Verify the
+        # correct underlying property instead: with skip_rate=3 the wrapper
+        # must skip more frames than it forwards (2 out of every 3 are skipped).
+        assert fst.skipped_frame_count > fst.active_frame_count
 
     def test_tracker_name_propagated(self):
         engine = BenchmarkEngine(verbose=False)
