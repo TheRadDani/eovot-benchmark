@@ -23,6 +23,7 @@ from .statistical import (
     PairwiseSummary,
     StatisticalTestEngine,
 )
+from .drift import DriftDetector, DriftResult
 
 __all__ = [
     "iou",
@@ -45,4 +46,6 @@ __all__ = [
     "WilcoxonResult",
     "PairwiseSummary",
     "StatisticalTestEngine",
+    "DriftDetector",
+    "DriftResult",
 ]
