@@ -1,0 +1,68 @@
+# Cross-Dataset Generalization Experiment Configuration
+# -------------------------------------------------------
+# Evaluates a fixed set of trackers across multiple datasets and produces a
+# generalization matrix showing which trackers transfer best across domains.
+#
+# Usage:
+#   python scripts/cross_dataset_analysis.py --config configs/experiments/cross_dataset.yaml
+
+experiment:
+  name: "cross-dataset-generalization"
+  seed: 42
+  tdp_watts: null                   # Enable energy profiling (e.g. 6.0 for RPi 4)
+
+# List of datasets to include in the cross-dataset comparison.
+# Each entry is an independent dataset config.  The analysis tool will run
+# every tracker from the `trackers` list on each dataset here.
+datasets:
+  - name: "OTB100"
+    loader: "OTBDataset"
+    root: "/data/OTB100"
+    max_sequences: null
+
+  - name: "GOT10k-val"
+    loader: "GOT10kDataset"
+    root: "/data/GOT10k"
+    split: "val"
+    max_sequences: 180              # Use the official 180-sequence val split
+
+  - name: "LaSOT"
+    loader: "LaSOTDataset"
+    root: "/data/LaSOT"
+    split: "test"
+    max_sequences: 280
+
+# To run a quick smoke test without downloading any data, use synthetic datasets:
+# datasets:
+#   - name: "Synthetic-Linear"
+#     loader: "SyntheticDataset"
+#     num_sequences: 10
+#     num_frames: 80
+#     motion: "linear"
+#   - name: "Synthetic-Random"
+#     loader: "SyntheticDataset"
+#     num_sequences: 10
+#     num_frames: 80
+#     motion: "random"
+
+trackers:
+  - name: MOSSE
+    params: {}
+
+  - name: KCF
+    params:
+      learning_rate: 0.125
+
+  - name: CSRT
+    params: {}
+
+  - name: CamShift
+    params: {}
+
+  - name: LKOpticalFlow
+    params: {}
+
+output:
+  dir: "results/cross_dataset"
+  save_per_tracker_json: true       # Save individual BenchmarkResult JSONs
+  report_formats: ["markdown", "csv", "latex"]
