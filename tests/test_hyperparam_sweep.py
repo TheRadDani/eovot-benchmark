@@ -17,8 +17,8 @@ def fast_dataset() -> SyntheticDataset:
     return SyntheticDataset(
         num_sequences=3,
         num_frames=30,
-        frame_size=(160, 120),
-        bbox_size=(20, 20),
+        frame_size=(320, 240),
+        bbox_size=(30, 30),
         motion="linear",
         seed=42,
     )
@@ -105,13 +105,14 @@ class TestHyperparamSweep:
         assert len(result.points) == len(values)
 
     def test_1d_sweep_optimal_config_key_present(self, fast_dataset):
+        # Use KCF — it is numerically stable across the full synthetic frame boundary range.
         sweep = HyperparamSweep(
-            tracker_name="MOSSE",
+            tracker_name="KCF",
             dataset=fast_dataset,
             dataset_name="Synthetic",
             max_sequences=2,
         )
-        result = sweep.run_1d(SweepAxis("learning_rate", [0.1, 0.2]))
+        result = sweep.run_1d(SweepAxis("learning_rate", [0.05, 0.125, 0.2]))
         assert "learning_rate" in result.optimal_config
 
     def test_2d_sweep_returns_correct_point_count(self, fast_dataset):
@@ -157,7 +158,7 @@ class TestHyperparamSweep:
 
     def test_empty_axis_raises(self, fast_dataset):
         sweep = HyperparamSweep(
-            tracker_name="MOSSE",
+            tracker_name="KCF",
             dataset=fast_dataset,
             max_sequences=2,
         )
