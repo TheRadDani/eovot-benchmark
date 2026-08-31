@@ -2,6 +2,7 @@
 
 from .skip_analysis import FrameSkipAnalyzer, SkipRateResult
 from .resolution_analysis import ResolutionScaleAnalyzer, ScaleResult, ScaleEntry
+from .tracker_correlation import TrackerCorrelationAnalyzer, CorrelationReport
 
 __all__ = [
     "FrameSkipAnalyzer",
@@ -9,4 +10,6 @@ __all__ = [
     "ResolutionScaleAnalyzer",
     "ScaleResult",
     "ScaleEntry",
+    "TrackerCorrelationAnalyzer",
+    "CorrelationReport",
 ]
