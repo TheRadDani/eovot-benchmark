@@ -1,0 +1,36 @@
+# EOVOT adaptive inference budget experiment (synthetic demo)
+#
+# Compares a plain MOSSE tracker against MOSSE wrapped in AdaptiveBudgetTracker
+# to quantify the accuracy–compute trade-off on a synthetic dataset.
+#
+# Run with:
+#   python scripts/run_experiment.py --config configs/experiments/adaptive_budget_demo.yaml
+#
+# For real datasets, replace the synthetic loader with:
+#   loader: OTBDataset  root: /data/OTB100  name: OTB100
+
+experiment:
+  name: "adaptive-budget-demo"
+  seed: 42
+  tdp_watts: null       # set to CPU TDP to enable energy profiling
+  # max_sequences: 5   # uncomment for a quicker smoke test
+
+dataset:
+  loader: synthetic
+  name: Synthetic-Mixed
+  n_sequences: 8
+  n_frames: 150
+  # motion: random     # "linear" | "circular" | "random"
+  # SyntheticDataset default is "linear"
+
+trackers:
+  # Baseline — tracker runs every frame
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+
+  # AdaptiveBudgetTracker is registered via the analysis script;
+  # use scripts/run_multi_dataset.py for a direct comparison.
+
+  # For a frame-skip baseline comparison, see:
+  # configs/experiments/frame_skip_analysis.yaml
