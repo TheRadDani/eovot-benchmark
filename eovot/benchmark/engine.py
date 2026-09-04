@@ -11,6 +11,7 @@ import numpy as np
 
 from ..datasets.base import BaseDataset, Sequence
 from ..metrics.accuracy import AccuracyMetrics, MetricsEngine
+from ..metrics.quality import AppearanceQualityEstimator, QualityResult
 from ..profiling.energy import EnergyProfiler, EnergyResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
@@ -26,6 +27,7 @@ class SequenceResult:
     center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
     energy: Optional[EnergyResult] = None          # energy estimate; None when TDP not configured
     accuracy_metrics: Optional[AccuracyMetrics] = None  # success AUC, precision AUC
+    quality: Optional[QualityResult] = None        # NCC appearance quality; None when not enabled
 
     @property
     def mean_iou(self) -> float:
@@ -355,15 +357,27 @@ class BenchmarkEngine:
             value (Watts).  Set to the device's CPU TDP for meaningful
             estimates (e.g. ``6.0`` for Raspberry Pi 4, ``15.0`` for a
             laptop).  Default: ``None`` (energy profiling disabled).
+        quality_estimator: If provided, runs appearance quality estimation on
+            every sequence using the given
+            :class:`~eovot.metrics.quality.AppearanceQualityEstimator` and
+            attaches a :class:`~eovot.metrics.quality.QualityResult` to each
+            :class:`SequenceResult`.  Pass ``AppearanceQualityEstimator()``
+            to enable with default settings.  Default: ``None`` (disabled).
     """
 
-    def __init__(self, verbose: bool = True, tdp_watts: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        verbose: bool = True,
+        tdp_watts: Optional[float] = None,
+        quality_estimator: Optional[AppearanceQualityEstimator] = None,
+    ) -> None:
         self.verbose = verbose
         self._metrics = MetricsEngine()
         self._profiler = Profiler()
         self._energy_profiler: Optional[EnergyProfiler] = (
             EnergyProfiler(tdp_watts=tdp_watts) if tdp_watts is not None else None
         )
+        self._quality_estimator = quality_estimator
 
     def run(
         self,
@@ -410,6 +424,8 @@ class BenchmarkEngine:
         self._profiler.reset()
         if self._energy_profiler is not None:
             self._energy_profiler.reset()
+        if self._quality_estimator is not None:
+            self._quality_estimator.reset()
 
         frames = list(seq)
         gt = seq.ground_truth
@@ -419,6 +435,8 @@ class BenchmarkEngine:
             if i == 0:
                 tracker.initialize(frame, seq.init_bbox)
                 preds.append(seq.init_bbox)
+                if self._quality_estimator is not None:
+                    self._quality_estimator.initialize(frame, seq.init_bbox)
             else:
                 self._profiler.start_frame()
                 if self._energy_profiler is not None:
@@ -428,6 +446,8 @@ class BenchmarkEngine:
                 if self._energy_profiler is not None:
                     self._energy_profiler.end_frame()
                 preds.append(bbox)
+                if self._quality_estimator is not None:
+                    self._quality_estimator.score(frame, bbox)
 
         preds_arr = np.array(preds, dtype=np.float64)
         n_eval = min(len(preds_arr), len(gt))
@@ -449,6 +469,13 @@ class BenchmarkEngine:
             except ValueError:
                 pass  # sequence too short (0 update frames)
 
+        quality: Optional[QualityResult] = None
+        if self._quality_estimator is not None:
+            quality = self._quality_estimator.result(
+                tracker_name=tracker.name,
+                sequence_name=seq.name,
+            )
+
         return SequenceResult(
             sequence_name=seq.name,
             ious=ious,
@@ -458,4 +485,5 @@ class BenchmarkEngine:
             center_distances=dists,
             energy=energy,
             accuracy_metrics=accuracy,
+            quality=quality,
         )
