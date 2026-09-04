@@ -1,0 +1,63 @@
+# EOVOT Occlusion Stress-Test Experiment
+# ----------------------------------------
+# Evaluates tracker robustness under structured periodic occlusion using the
+# OcclusionSyntheticDataset.  Produces standard EOVOT benchmark metrics AND
+# per-phase occlusion robustness scores (pre / during / post / recovery AUC).
+#
+# Run with:
+#   python scripts/run_experiment.py --config configs/experiments/occlusion_stress_test.yaml
+#
+# Then post-process results with OcclusionRobustnessAnalyzer:
+#
+#   from eovot.datasets.occlusion import OcclusionSyntheticDataset
+#   from eovot.metrics.occlusion import OcclusionRobustnessAnalyzer
+#   from eovot.benchmark.engine import BenchmarkResult
+#   import json
+#
+#   ds = OcclusionSyntheticDataset(**dataset.params_below)
+#   result = BenchmarkResult.load("results/experiments/occlusion-stress-test/MOSSE-OcclusionSynth.json")
+#   analyzer = OcclusionRobustnessAnalyzer(context_frames=10, recovery_window=15)
+#   agg = analyzer.analyze_benchmark(result, ds, tracker_name="MOSSE")
+#   print(agg["aggregate"])
+
+experiment:
+  name: "occlusion-stress-test"
+  seed: 42
+  tdp_watts: null                    # Set to device TDP (e.g. 6.0 for RPi 4) to enable energy profiling
+
+dataset:
+  loader: SyntheticDataset           # Uses SyntheticDataset for BenchmarkEngine compat;
+  name: OcclusionSynth               # use OcclusionSyntheticDataset in post-processing scripts
+  num_sequences: 10
+  num_frames: 120
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  motion: linear
+  seed: 42
+
+trackers:
+  - name: MOSSE
+    params: {}
+
+  - name: KCF
+    params: {}
+
+  - name: CSRT
+    params: {}
+
+  - name: MedianFlow
+    params: {}
+
+  - name: CamShift
+    params: {}
+
+# Occlusion parameters (used by OcclusionSyntheticDataset in post-processing):
+occlusion:
+  occluder_size: [60, 60]            # Larger than target (40×40) to fully hide it
+  occlusion_interval: 25             # New occlusion every 25 frames → ~4 events per 120-frame seq
+  occlusion_duration: 8              # Each occlusion lasts 8 frames
+
+# Analysis parameters (used by OcclusionRobustnessAnalyzer in post-processing):
+analysis:
+  context_frames: 10                 # Pre-occlusion window size
+  recovery_window: 15                # Post-occlusion recovery window size
