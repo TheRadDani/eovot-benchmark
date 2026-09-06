@@ -177,6 +177,89 @@ class FrameSkipTracker(BaseTracker):
             return 0.0
         return self.skipped_frame_count / self._frame_idx
 
+    def active_fps(self, total_fps: float) -> float:
+        """Convert benchmark-reported FPS to inner-tracker call rate.
+
+        The benchmark engine measures FPS over **all** frames (active and
+        passive).  When ``skip_rate > 1``, passive frames are essentially
+        free (a simple bbox lookup / linear extrapolation) so the reported
+        FPS is dominated by passive-frame throughput and *overestimates* how
+        fast the inner tracker runs.
+
+        This method converts the profiler's ``mean_fps`` back to the rate
+        at which the wrapped tracker is actually invoked:
+
+            active_fps = total_fps / skip_rate
+
+        Use ``active_fps`` to compare a frame-skip run against a baseline
+        full-rate run in terms of inner-tracker compute load.
+
+        Args:
+            total_fps: FPS as reported by :class:`~eovot.profiling.profiler.Profiler`
+                (all frames, active + passive).
+
+        Returns:
+            Effective call rate of the underlying tracker (frames per second
+            at which full tracking updates occur).
+
+        Example::
+
+            result = engine.run(FrameSkipTracker(MOSSETracker(), skip_rate=3), ...)
+            inner_rate = fst.active_fps(result.mean_fps)
+            # inner_rate ≈ result.mean_fps / 3
+        """
+        if self.skip_rate <= 0:
+            return 0.0
+        return total_fps / self.skip_rate
+
+    def theoretical_speedup(
+        self, inner_latency_ms: float, passive_overhead_ms: float = 0.0
+    ) -> float:
+        """Estimate the wall-clock speedup factor from frame skipping.
+
+        Models the per-sequence latency as::
+
+            T_active  = active_frames  × inner_latency_ms
+            T_passive = passive_frames × passive_overhead_ms
+            T_total   = T_active + T_passive
+
+        Speedup relative to full-rate (all frames active) is::
+
+            speedup = (N × inner_latency_ms) / T_total
+                    = skip_rate / (1 + (skip_rate - 1) × passive_overhead_ms
+                                         / inner_latency_ms)
+
+        When ``passive_overhead_ms ≈ 0`` (ideal case), speedup = ``skip_rate``.
+        When passive frames are non-negligible (e.g., linear extrapolation math
+        costs ~10 % of inner_latency_ms), the actual speedup is lower.
+
+        Args:
+            inner_latency_ms: Mean per-frame latency of the underlying tracker
+                in milliseconds (e.g., from a baseline profiling run).
+            passive_overhead_ms: Mean latency of passive frames in milliseconds.
+                Use 0.0 to compute the theoretical maximum speedup.  Default: 0.0.
+
+        Returns:
+            Speedup factor > 0.  Values > 1.0 indicate the skip-tracker is
+            faster than full-rate; < 1.0 indicates overhead dominates (which
+            only happens when the inner tracker is cheaper than the skip logic).
+
+        Raises:
+            ValueError: If ``inner_latency_ms`` ≤ 0.
+
+        Example::
+
+            # MOSSE runs at 2 ms/frame; passive frames cost 0.01 ms (interpolation)
+            fst = FrameSkipTracker(MOSSETracker(), skip_rate=4)
+            print(fst.theoretical_speedup(inner_latency_ms=2.0, passive_overhead_ms=0.01))
+            # ≈ 3.98  (very close to 4× because passive overhead is tiny)
+        """
+        if inner_latency_ms <= 0:
+            raise ValueError(f"inner_latency_ms must be > 0, got {inner_latency_ms}")
+        numerator = self.skip_rate
+        denominator = 1.0 + (self.skip_rate - 1) * passive_overhead_ms / inner_latency_ms
+        return numerator / denominator
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
