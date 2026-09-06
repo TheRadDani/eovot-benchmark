@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Iterator
 
 import numpy as np
@@ -34,6 +35,32 @@ class _CountingTracker(BaseTracker):
         self.update_calls = 0
 
     def update(self, frame):
+        self.update_calls += 1
+        return _FIXED_BOX
+
+
+class _SlowCountingTracker(BaseTracker):
+    """_CountingTracker with a configurable per-frame sleep.
+
+    Used in FPS-comparison tests where the inner tracker must be
+    non-trivially slow relative to the FrameSkipTracker's bookkeeping
+    overhead, so that skip_rate > 1 produces a measurable FPS improvement.
+    Without a realistic compute delay the FrameSkipTracker's frame-index
+    management can dominate and make skip=3 appear *slower* than skip=1
+    on sub-microsecond test trackers.
+    """
+
+    _DELAY_S: float = 1e-3  # 1 ms per active frame — slow enough to measure
+
+    def __init__(self):
+        super().__init__(name="CountingTracker")
+        self.update_calls = 0
+
+    def initialize(self, frame, bbox):
+        self.update_calls = 0
+
+    def update(self, frame):
+        time.sleep(self._DELAY_S)
         self.update_calls += 1
         return _FIXED_BOX
 
@@ -201,15 +228,17 @@ class TestFrameSkipWithEngine:
     def test_higher_skip_rate_higher_fps(self):
         engine = BenchmarkEngine(verbose=False)
         dataset = _TinyDataset(n=2)
-        r1 = engine.run(_CountingTracker(), dataset, dataset_name="Syn")
+        # Use a slow inner tracker so that skip=3 meaningfully reduces compute.
+        # _CountingTracker executes in ~0.5 µs which is below the
+        # FrameSkipTracker bookkeeping cost, making skip=3 appear slower.
+        r1 = engine.run(_SlowCountingTracker(), dataset, dataset_name="Syn")
         r3 = engine.run(
-            FrameSkipTracker(_CountingTracker(), skip_rate=3),
+            FrameSkipTracker(_SlowCountingTracker(), skip_rate=3),
             dataset,
             dataset_name="Syn",
         )
-        # skip_rate=3 should be at least as fast as skip_rate=1
-        # (on a constant tracker the overhead is negligible, allow 10% slack)
-        assert r3.mean_fps >= r1.mean_fps * 0.5
+        # skip_rate=3 should meaningfully speed things up over full-rate
+        assert r3.mean_fps >= r1.mean_fps * 1.5
 
     def test_tracker_name_propagated(self):
         engine = BenchmarkEngine(verbose=False)
@@ -336,3 +365,49 @@ class TestFrameSkipAnalyzer:
         )
         assert "repeat" in modes and "linear" in modes
         assert isinstance(modes["repeat"], SkipRateResult)
+
+
+# ---------------------------------------------------------------------------
+# FrameSkipTracker — active_fps and theoretical_speedup
+# ---------------------------------------------------------------------------
+
+class TestFrameSkipTrackerSpeedupMethods:
+    def test_active_fps_skip1(self):
+        fst = FrameSkipTracker(_CountingTracker(), skip_rate=1)
+        assert fst.active_fps(300.0) == pytest.approx(300.0)
+
+    def test_active_fps_skip4(self):
+        fst = FrameSkipTracker(_CountingTracker(), skip_rate=4)
+        assert fst.active_fps(400.0) == pytest.approx(100.0)
+
+    def test_active_fps_skip_rate_zero_guard(self):
+        # The guard branch: create a tracker and monkey-patch skip_rate to 0.
+        fst = FrameSkipTracker(_CountingTracker(), skip_rate=1)
+        fst.skip_rate = 0
+        assert fst.active_fps(100.0) == 0.0
+
+    def test_theoretical_speedup_no_overhead(self):
+        fst = FrameSkipTracker(_CountingTracker(), skip_rate=4)
+        # With zero passive overhead the speedup equals skip_rate exactly.
+        assert fst.theoretical_speedup(inner_latency_ms=2.0) == pytest.approx(4.0)
+
+    def test_theoretical_speedup_with_overhead(self):
+        fst = FrameSkipTracker(_CountingTracker(), skip_rate=4)
+        # Passive overhead = 10% of inner latency (0.2 ms vs 2.0 ms)
+        # speedup = 4 / (1 + 3 * 0.1) = 4 / 1.3 ≈ 3.077
+        result = fst.theoretical_speedup(inner_latency_ms=2.0, passive_overhead_ms=0.2)
+        assert result == pytest.approx(4.0 / 1.3, rel=1e-4)
+
+    def test_theoretical_speedup_skip1_is_one(self):
+        fst = FrameSkipTracker(_CountingTracker(), skip_rate=1)
+        assert fst.theoretical_speedup(inner_latency_ms=1.0) == pytest.approx(1.0)
+
+    def test_theoretical_speedup_invalid_latency_raises(self):
+        fst = FrameSkipTracker(_CountingTracker(), skip_rate=2)
+        with pytest.raises(ValueError):
+            fst.theoretical_speedup(inner_latency_ms=0.0)
+
+    def test_theoretical_speedup_negative_latency_raises(self):
+        fst = FrameSkipTracker(_CountingTracker(), skip_rate=2)
+        with pytest.raises(ValueError):
+            fst.theoretical_speedup(inner_latency_ms=-1.0)
