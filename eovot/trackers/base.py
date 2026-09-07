@@ -58,5 +58,19 @@ class BaseTracker(ABC):
         """
         ...
 
+    @property
+    def confidence(self):
+        """Normalised tracking confidence after the last :meth:`update` call.
+
+        Returns a float in ``[0, 1]`` when the tracker supports confidence
+        estimation, or ``None`` when it does not.  The default implementation
+        returns ``None``; subclasses that compute an internal quality signal
+        (e.g. PSR-based confidence) should override this property.
+
+        Downstream consumers (fusion modules, alarm systems) can use this
+        signal to weight predictions or trigger re-initialisation.
+        """
+        return None
+
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name={self.name!r})"

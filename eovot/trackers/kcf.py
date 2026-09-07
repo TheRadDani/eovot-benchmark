@@ -213,8 +213,12 @@ class KCFTracker(BaseTracker):
             DFT of the Gaussian kernel response map.
         """
         N = xf.shape[0] * xf.shape[1]
-        xx = np.real(np.sum(xf * np.conj(xf))) / N
-        zz = np.real(np.sum(zf * np.conj(zf))) / N
+        # Squared norms via Parseval: sum(|xf|^2)/N = N*sum(|x|^2)/N = sum(|x|^2).
+        # Normalise by N again so xx and zz match the per-element scale of cross.
+        # numpy's ifft2 already divides by N, so ifft2(conj(xf)*zf) = xcorr/N.
+        # All three terms must be on the same per-element scale to avoid exponent overflow.
+        xx = np.real(np.sum(xf * np.conj(xf))) / (N * N)
+        zz = np.real(np.sum(zf * np.conj(zf))) / (N * N)
         cross = np.real(np.fft.ifft2(np.conj(xf) * zf)) / N
         exponent = np.maximum(0.0, xx + zz - 2.0 * cross) / (self.kernel_sigma ** 2)
         return np.fft.fft2(np.exp(-exponent))
