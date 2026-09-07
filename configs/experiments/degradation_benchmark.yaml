@@ -1,0 +1,139 @@
+# EOVOT degradation robustness benchmark
+# ----------------------------------------
+# Evaluates tracker robustness against four classes of frame degradation
+# that are typical of edge-deployed vision systems:
+#
+#   noise       — cheap CMOS sensor noise (Gaussian additive)
+#   blur        — motion blur from fast-moving UAV / ground vehicle
+#   dark        — low-light / poor outdoor contrast conditions
+#   occlusion   — partial target occlusion by foreground objects
+#
+# Run with:
+#   python scripts/run_experiment.py \
+#     --config configs/experiments/degradation_benchmark.yaml
+#
+# Each condition wraps the same SyntheticDataset so mIoU deltas isolate
+# the effect of each degradation type.  Compare results across conditions
+# to identify tracker failure modes before field deployment.
+#
+# Python API equivalent:
+#
+#   from eovot.datasets.synthetic import SyntheticDataset
+#   from eovot.datasets.degraded import DegradedDataset, DegradationConfig
+#   from eovot.benchmark.engine import BenchmarkEngine
+#   from eovot.trackers.adaptive_kcf import AdaptiveKCFTracker
+#
+#   base = SyntheticDataset(num_sequences=10, num_frames=100)
+#   noisy = DegradedDataset(base, DegradationConfig(noise_std=20.0))
+#   result = BenchmarkEngine(verbose=True).run(
+#       AdaptiveKCFTracker(psr_threshold=7.0), noisy,
+#       dataset_name="Synthetic-Noisy"
+#   )
+
+experiment:
+  name: "degradation-robustness-benchmark"
+  seed: 42
+
+# --- Baseline (no degradation) ---
+conditions:
+  - label: "clean"
+    dataset:
+      loader: SyntheticDataset
+      name: "Synthetic-Clean"
+      num_sequences: 10
+      num_frames: 100
+      motion: linear
+      frame_size: [320, 240]
+      bbox_size: [40, 40]
+      seed: 42
+    degradation:
+      noise_std: 0.0
+      blur_kernel_size: 0
+      brightness_alpha: 1.0
+      brightness_beta: 0.0
+      occlusion_fraction: 0.0
+
+  - label: "gaussian-noise-20"
+    dataset:
+      loader: SyntheticDataset
+      name: "Synthetic-Noisy"
+      num_sequences: 10
+      num_frames: 100
+      motion: linear
+      frame_size: [320, 240]
+      bbox_size: [40, 40]
+      seed: 42
+    degradation:
+      noise_std: 20.0
+      blur_kernel_size: 0
+      brightness_alpha: 1.0
+      brightness_beta: 0.0
+      occlusion_fraction: 0.0
+
+  - label: "motion-blur-k7"
+    dataset:
+      loader: SyntheticDataset
+      name: "Synthetic-Blurry"
+      num_sequences: 10
+      num_frames: 100
+      motion: linear
+      frame_size: [320, 240]
+      bbox_size: [40, 40]
+      seed: 42
+    degradation:
+      noise_std: 0.0
+      blur_kernel_size: 7
+      brightness_alpha: 1.0
+      brightness_beta: 0.0
+      occlusion_fraction: 0.0
+
+  - label: "low-light"
+    dataset:
+      loader: SyntheticDataset
+      name: "Synthetic-Dark"
+      num_sequences: 10
+      num_frames: 100
+      motion: linear
+      frame_size: [320, 240]
+      bbox_size: [40, 40]
+      seed: 42
+    degradation:
+      noise_std: 0.0
+      blur_kernel_size: 0
+      brightness_alpha: 0.35
+      brightness_beta: -25.0
+      occlusion_fraction: 0.0
+
+  - label: "partial-occlusion-10pct"
+    dataset:
+      loader: SyntheticDataset
+      name: "Synthetic-Occluded"
+      num_sequences: 10
+      num_frames: 100
+      motion: linear
+      frame_size: [320, 240]
+      bbox_size: [40, 40]
+      seed: 42
+    degradation:
+      noise_std: 0.0
+      blur_kernel_size: 0
+      brightness_alpha: 1.0
+      brightness_beta: 0.0
+      occlusion_fraction: 0.10
+
+# --- Trackers to compare ---
+trackers:
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+
+  - name: KCF
+    params:
+      learning_rate: 0.075
+      padding: 1.5
+
+  - name: AdaptiveKCF
+    params:
+      psr_threshold: 7.0
+      learning_rate: 0.075
+      padding: 1.5
