@@ -1,6 +1,7 @@
 from .base import BaseTracker, BBox
 from .mosse import MOSSETracker
 from .kcf import KCFTracker
+from .adaptive_kcf import AdaptiveKCFTracker
 from .csrt import CSRTTracker
 from .lk_optical_flow import LKOpticalFlowTracker
 from .median_flow import MedianFlowTracker
@@ -13,6 +14,7 @@ __all__ = [
     "BBox",
     "MOSSETracker",
     "KCFTracker",
+    "AdaptiveKCFTracker",
     "CSRTTracker",
     "LKOpticalFlowTracker",
     "MedianFlowTracker",
