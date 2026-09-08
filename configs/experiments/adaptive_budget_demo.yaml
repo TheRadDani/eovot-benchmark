@@ -1,0 +1,70 @@
+# Adaptive Budget Tracker demo experiment
+#
+# Evaluates AdaptiveBudgetTracker with different latency budgets against a
+# fixed-scale MOSSE baseline.  Use this config to measure how the closed-loop
+# controller trades accuracy for throughput on resource-constrained hardware.
+#
+# Run:
+#   python scripts/run_experiment.py configs/experiments/adaptive_budget_demo.yaml
+
+experiment:
+  name: adaptive_budget_demo
+  description: >
+    Adaptive Budget Tracker experiment: compares MOSSE at full resolution against
+    AdaptiveBudget-wrapped MOSSE at three latency budgets (5 ms, 10 ms, 20 ms).
+    Shows how the closed-loop controller degrades gracefully under tight budgets
+    while recovering quality when headroom is available.
+
+dataset:
+  type: synthetic
+  num_sequences: 10
+  num_frames: 100
+  seed: 42
+
+trackers:
+  - name: MOSSE
+    params: {}
+
+  # Budget = 20 ms (~50 FPS ceiling): generous — expect minimal adaptation
+  - name: AdaptiveBudget_MOSSE_20ms
+    base_tracker: MOSSE
+    wrapper: AdaptiveBudget
+    wrapper_params:
+      budget_ms: 20.0
+      scale_step: 0.15
+      min_scale: 0.25
+      window_size: 8
+      restore_headroom: 0.75
+
+  # Budget = 10 ms (~100 FPS ceiling): moderate — expect some scale reductions
+  - name: AdaptiveBudget_MOSSE_10ms
+    base_tracker: MOSSE
+    wrapper: AdaptiveBudget
+    wrapper_params:
+      budget_ms: 10.0
+      scale_step: 0.15
+      min_scale: 0.25
+      window_size: 8
+      restore_headroom: 0.75
+
+  # Budget = 5 ms (~200 FPS ceiling): tight — expect frequent downscaling
+  - name: AdaptiveBudget_MOSSE_5ms
+    base_tracker: MOSSE
+    wrapper: AdaptiveBudget
+    wrapper_params:
+      budget_ms: 5.0
+      scale_step: 0.15
+      min_scale: 0.25
+      window_size: 8
+      restore_headroom: 0.75
+
+profiling:
+  enabled: true
+  tdp_watts: null  # set to device TDP (e.g. 6.0 for Raspberry Pi 4) for energy estimates
+
+output:
+  save_results: true
+  output_dir: results/adaptive_budget_demo
+  formats:
+    - json
+    - markdown

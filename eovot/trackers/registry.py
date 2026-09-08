@@ -43,6 +43,11 @@ TRACKER_REGISTRY: Dict[str, Type[BaseTracker]] = {
     "LKOpticalFlow": LKOpticalFlowTracker,
 }
 
+# AdaptiveBudgetTracker is a wrapper (not a concrete tracker) — it cannot be
+# instantiated by name alone because it requires a wrapped tracker instance.
+# It is exported here for import convenience and type-checked usage.
+from .adaptive_budget import AdaptiveBudgetTracker  # noqa: F401  (re-exported)
+
 # DaSiamRPN / NanoTracker need pre-trained ONNX files the user supplies
 # explicitly (see eovot.trackers.opencv_dl docstrings), but the registry
 # should still be able to name and construct them when params are given.
