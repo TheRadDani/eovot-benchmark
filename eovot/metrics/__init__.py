@@ -1,10 +1,16 @@
-"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, and attribute analysis."""
+"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, attribute analysis, and multi-dataset aggregation."""
 
 from .accuracy import (
     iou,
     center_distance,
     AccuracyMetrics,
     MetricsEngine,
+)
+from .aggregation import (
+    AGGREGATE_METRICS,
+    AggregationReport,
+    MultiDatasetAggregator,
+    PerDatasetRow,
 )
 from .attributes import (
     ALL_ATTRIBUTES,
@@ -29,6 +35,10 @@ __all__ = [
     "center_distance",
     "AccuracyMetrics",
     "MetricsEngine",
+    "AGGREGATE_METRICS",
+    "AggregationReport",
+    "MultiDatasetAggregator",
+    "PerDatasetRow",
     "ALL_ATTRIBUTES",
     "ATTRIBUTE_DESCRIPTIONS",
     "AttributeAnalyzer",
