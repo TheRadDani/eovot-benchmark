@@ -32,9 +32,9 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..benchmark.engine import BenchmarkResult
@@ -149,35 +149,28 @@ class EdgeScorecard:
         """
         rows: List[ScorecardRow] = []
         for result in results:
-            # Aggregate profiling across all sequences for simulation input
-            from ..profiling.profiler import ProfilingResult
-            import numpy as np
-
             seq_profiling = [s.profiling for s in result.sequence_results]
             if not seq_profiling:
                 continue
 
-            # Build a representative ProfilingResult from sequence averages
-            fps_vals = np.array([p.fps for p in seq_profiling])
-            lat_vals = np.array([p.latency_mean_ms for p in seq_profiling])
-            mem_vals = np.array([p.peak_memory_mb for p in seq_profiling])
+            import numpy as np
+            from ..profiling.profiler import ProfilingResult
 
+            # Build a representative ProfilingResult from sequence averages
             host_profiling = ProfilingResult(
                 tracker_name=result.tracker_name,
                 frame_count=sum(p.frame_count for p in seq_profiling),
-                fps=float(fps_vals.mean()),
-                latency_mean_ms=float(lat_vals.mean()),
-                latency_std_ms=float(np.array([p.latency_std_ms for p in seq_profiling]).mean()),
-                latency_p95_ms=float(np.array([p.latency_p95_ms for p in seq_profiling]).mean()),
-                latency_p99_ms=float(np.array([p.latency_p99_ms for p in seq_profiling]).mean()),
-                latency_cv=float(np.array([p.latency_cv for p in seq_profiling]).mean()),
-                peak_memory_mb=float(mem_vals.max()),
+                fps=float(np.mean([p.fps for p in seq_profiling])),
+                latency_mean_ms=float(np.mean([p.latency_mean_ms for p in seq_profiling])),
+                latency_std_ms=float(np.mean([p.latency_std_ms for p in seq_profiling])),
+                latency_p95_ms=float(np.mean([p.latency_p95_ms for p in seq_profiling])),
+                latency_p99_ms=float(np.mean([p.latency_p99_ms for p in seq_profiling])),
+                latency_cv=float(np.mean([p.latency_cv for p in seq_profiling])),
+                peak_memory_mb=float(np.max([p.peak_memory_mb for p in seq_profiling])),
             )
 
             for device_name in self._devices:
-                row = self._evaluate_pair(
-                    result, host_profiling, device_name
-                )
+                row = self._evaluate_pair(result, host_profiling, device_name)
                 rows.append(row)
 
         rows.sort(key=lambda r: (r.tracker_name, r.device_name))
@@ -292,18 +285,20 @@ class EdgeScorecard:
         device_name: str,
     ) -> ScorecardRow:
         """Compute a single scorecard row for one tracker × device pair."""
-        device_profile = self._sim._profiles[device_name]
-
         sim_result = self._sim.simulate(
             host_profiling,
             device_name,
             sustained_seconds=self.sustained_seconds,
         )
 
-        projected_fps = sim_result.sustained_fps
-        projected_latency_ms = (1000.0 / projected_fps) if projected_fps > 0 else float("inf")
-        memory_ok = host_profiling.peak_memory_mb <= device_profile.memory_limit_mb
-        energy_wh_per_hour = sim_result.energy_wh_per_hour
+        projected_fps = sim_result.estimated_fps
+        projected_latency_ms = sim_result.estimated_latency_ms
+        memory_ok = sim_result.fits_in_memory
+
+        # Convert mJ/frame × fps × 3600 s/h ÷ 1000 mJ/Wh = Wh/h
+        energy_wh_per_hour = (
+            sim_result.estimated_energy_mj_per_frame * projected_fps * 3.6
+        )
 
         score = self._deployment_score(
             projected_fps=projected_fps,
@@ -326,7 +321,12 @@ class EdgeScorecard:
             tier=tier,
         )
 
-    def _deployment_score(self, projected_fps: float, memory_ok: bool, energy_wh_per_hour: float) -> float:
+    def _deployment_score(
+        self,
+        projected_fps: float,
+        memory_ok: bool,
+        energy_wh_per_hour: float,
+    ) -> float:
         """Compute the Deployment Score for one (tracker, device) pair.
 
         Formula::
@@ -337,14 +337,6 @@ class EdgeScorecard:
             score       = (1 - w) * fps_term * mem_factor + w * energy_term
 
         where ``w = energy_weight``.
-
-        Args:
-            projected_fps:    Projected FPS on the target device.
-            memory_ok:        True when the tracker fits in device RAM.
-            energy_wh_per_hour: Watt-hours per hour of continuous operation.
-
-        Returns:
-            Deployment Score in ``[0, 1]``.
         """
         fps_term = min(projected_fps / self.target_fps, 1.0) if self.target_fps > 0 else 0.0
         mem_factor = 1.0 if memory_ok else 0.0
