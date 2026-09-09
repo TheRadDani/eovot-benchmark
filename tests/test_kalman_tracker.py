@@ -13,6 +13,31 @@ from eovot.trackers.mosse import MOSSETracker
 INIT_BBOX = (30.0, 40.0, 50.0, 60.0)
 
 
+def _make_frame(h: int = 120, w: int = 160) -> np.ndarray:
+    """Random BGR frame — fine for Kalman-only tests that never call cv2."""
+    rng = np.random.default_rng(42)
+    return rng.integers(0, 256, (h, w, 3), dtype=np.uint8)
+
+
+def _make_trackable_frame(h: int = 120, w: int = 160) -> np.ndarray:
+    """BGR frame with a bright green rectangle at INIT_BBOX.
+
+    On a random-noise frame MOSSE's correlation peak wanders after ~15
+    frames, pushing the predicted bbox off-screen and causing cv2.resize
+    to receive a zero-area image.  A clear visual target keeps MOSSE
+    locked to the same position across many updates.
+    """
+    frame = np.zeros((h, w, 3), dtype=np.uint8)
+    x, y, tw, th = (
+        int(INIT_BBOX[0]),
+        int(INIT_BBOX[1]),
+        int(INIT_BBOX[2]),
+        int(INIT_BBOX[3]),
+    )
+    frame[y : y + th, x : x + tw] = [0, 200, 0]  # bright green
+    return frame
+
+
 # -------------------------------------------------------------------------
 # KalmanBoxPredictor tests
 # -------------------------------------------------------------------------
@@ -26,11 +51,17 @@ class TestKalmanBoxPredictor:
     def test_correct_requires_predict_first(self):
         kf = KalmanBoxPredictor()
         kf.initialize(INIT_BBOX)
-        # predict not called yet — correct should still work (predict was
-        # called implicitly at initialize time? No — it should fail).
-        # Our impl requires predict() before correct().
-        with pytest.raises(RuntimeError):
+        # predict() has not been called — correct() must raise
+        with pytest.raises(RuntimeError, match="predict\(\)"):
             kf.correct((31.0, 41.0, 50.0, 60.0))
+
+    def test_correct_succeeds_after_predict(self):
+        kf = KalmanBoxPredictor()
+        kf.initialize(INIT_BBOX)
+        kf.predict()
+        # Should not raise
+        corrected = kf.correct((31.0, 41.0, 50.0, 60.0))
+        assert len(corrected) == 4
 
     def test_prediction_close_to_init_on_first_frame(self):
         kf = KalmanBoxPredictor()
@@ -90,15 +121,17 @@ class TestKalmanBoxPredictor:
         with pytest.raises(RuntimeError):
             kf.predict()
 
+    def test_predict_only_sequence_does_not_raise(self):
+        """Multiple predict() calls without correct() are valid (Kalman-only frames)."""
+        kf = KalmanBoxPredictor()
+        kf.initialize(INIT_BBOX)
+        for _ in range(5):
+            kf.predict()   # no correct() — must not raise
+
 
 # -------------------------------------------------------------------------
 # AdaptiveComputeTracker tests
 # -------------------------------------------------------------------------
-
-def _make_frame(h: int = 120, w: int = 160) -> np.ndarray:
-    rng = np.random.default_rng(42)
-    return rng.integers(0, 256, (h, w, 3), dtype=np.uint8)
-
 
 class TestAdaptiveComputeTracker:
     def _build_tracker(self, budget_ms: float = 1000.0) -> AdaptiveComputeTracker:
@@ -119,7 +152,7 @@ class TestAdaptiveComputeTracker:
 
     def test_runs_full_pipeline(self):
         tracker = self._build_tracker(budget_ms=1000.0)
-        frame = _make_frame()
+        frame = _make_trackable_frame()
         tracker.initialize(frame, INIT_BBOX)
         for _ in range(20):
             bbox = tracker.update(frame)
@@ -129,7 +162,7 @@ class TestAdaptiveComputeTracker:
     def test_stats_account_for_all_frames(self):
         n_frames = 30
         tracker = self._build_tracker(budget_ms=1000.0)
-        frame = _make_frame()
+        frame = _make_trackable_frame()
         tracker.initialize(frame, INIT_BBOX)
         for _ in range(n_frames):
             tracker.update(frame)
@@ -146,7 +179,7 @@ class TestAdaptiveComputeTracker:
             window_size=5,
             safety_sigma=0.0,
         )
-        frame = _make_frame()
+        frame = _make_trackable_frame()
         tracker.initialize(frame, INIT_BBOX)
         for _ in range(20):
             tracker.update(frame)
@@ -156,7 +189,7 @@ class TestAdaptiveComputeTracker:
 
     def test_kalman_ratio_between_zero_and_one(self):
         tracker = self._build_tracker()
-        frame = _make_frame()
+        frame = _make_trackable_frame()
         tracker.initialize(frame, INIT_BBOX)
         for _ in range(25):
             tracker.update(frame)

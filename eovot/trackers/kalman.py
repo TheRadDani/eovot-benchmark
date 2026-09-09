@@ -51,6 +51,12 @@ class KalmanBoxPredictor:
     manoeuvre detection — just a standard linear Kalman filter implemented in
     20-line NumPy arithmetic so it runs in microseconds on any hardware.
 
+    Calling contract
+    ----------------
+    After :meth:`initialize`, you must call :meth:`predict` before each call
+    to :meth:`correct`.  Calling :meth:`correct` without a preceding
+    :meth:`predict` raises :class:`RuntimeError`.
+
     Args:
         process_noise:     Scalar added to the diagonal of the process-noise
             matrix ``Q``.  Larger values let the filter react faster to
@@ -91,6 +97,7 @@ class KalmanBoxPredictor:
         self.P: Optional[np.ndarray] = None   # (8, 8)
 
         self._innovation_norm: float = 0.0
+        self._predicted: bool = False  # True after predict(), False after correct()
 
     # ------------------------------------------------------------------
     # Public API
@@ -113,11 +120,14 @@ class KalmanBoxPredictor:
             self.P[i, i] = 100.0
 
         self._innovation_norm = 0.0
+        self._predicted = False
 
     def predict(self) -> BBox:
         """Advance the filter by one time step and return the predicted box.
 
-        Must be called before :meth:`correct` on each frame.
+        Must be called before :meth:`correct` on each frame.  May be called
+        without a subsequent :meth:`correct` on frames where no tracker
+        measurement is available (Kalman-only frames).
 
         Returns:
             Predicted bounding box ``(x, y, w, h)``.
@@ -130,6 +140,7 @@ class KalmanBoxPredictor:
 
         self.x = self.F @ self.x
         self.P = self.F @ self.P @ self.F.T + self.Q
+        self._predicted = True
 
         return self._state_to_bbox()
 
@@ -147,10 +158,15 @@ class KalmanBoxPredictor:
             Corrected (posterior) bounding box ``(x, y, w, h)``.
 
         Raises:
-            RuntimeError: If :meth:`predict` has not been called this frame.
+            RuntimeError: If :meth:`predict` has not been called this cycle.
         """
         if self.x is None or self.P is None:
-            raise RuntimeError("Call predict() before correct().")
+            raise RuntimeError("KalmanBoxPredictor must be initialized before correct().")
+        if not self._predicted:
+            raise RuntimeError(
+                "predict() must be called before correct(). "
+                "Call predict() once per frame, then optionally correct()."
+            )
 
         z = np.array(bbox, dtype=np.float64)
 
@@ -170,6 +186,7 @@ class KalmanBoxPredictor:
 
         # Normalised innovation magnitude — small = high confidence
         self._innovation_norm = float(np.sqrt(y_innov @ y_innov))
+        self._predicted = False
 
         return self._state_to_bbox()
 
@@ -194,6 +211,7 @@ class KalmanBoxPredictor:
         self.x = None
         self.P = None
         self._innovation_norm = 0.0
+        self._predicted = False
 
     # ------------------------------------------------------------------
     # Internal helpers
