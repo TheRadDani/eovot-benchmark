@@ -1,0 +1,35 @@
+# Adaptive Budget Tracker demo — sweeps multiple FPS budgets on a small dataset.
+#
+# Run with:
+#   python scripts/run_adaptive_analysis.py --config configs/experiments/adaptive_budget_demo.yaml
+
+adaptive_analysis:
+  # Zero-argument tracker factory resolved by name in the registry.
+  tracker: MOSSE
+
+  # FPS budgets to sweep.  Lower values allow more aggressive skipping.
+  fps_budgets: [10, 20, 30, 60]
+
+  # Upper bound on consecutive skipped frames (0 = disable skipping).
+  max_skip: 7
+
+  # Initial frames always processed at full rate for latency baseline.
+  warmup_frames: 5
+
+  # Rolling-window size for the latency estimator.
+  window_size: 8
+
+  verbose: true
+
+dataset:
+  loader: SyntheticDataset
+  # Parameters forwarded to SyntheticDataset when loader is SyntheticDataset.
+  num_sequences: 10
+  num_frames: 120
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  motion: linear
+  seed: 42
+
+output:
+  dir: results/adaptive_budget_demo
