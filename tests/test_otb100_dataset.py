@@ -182,7 +182,7 @@ class TestSequenceLoading:
     def test_sequence_has_frames(self, otb_root):
         ds = OTB100Dataset(root=otb_root, split="all")
         seq = next(iter(ds))
-        assert len(seq.frames) == 5
+        assert len(seq) == 5
 
     def test_sequence_has_gt(self, otb_root):
         ds = OTB100Dataset(root=otb_root, split="all")

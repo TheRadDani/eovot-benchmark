@@ -463,6 +463,13 @@ class OTB100Dataset(BaseDataset):
                 continue
             seq_dirs.append(candidate)
 
+        if not seq_dirs:
+            raise ValueError(
+                f"No valid sequences found in {self.root!r} for split={self.split!r}. "
+                "Ensure the directory contains subdirectories with "
+                "'groundtruth_rect.txt' and 'img/' inside."
+            )
+
         if self.max_sequences is not None:
             seq_dirs = seq_dirs[: self.max_sequences]
 
