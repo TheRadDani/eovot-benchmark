@@ -232,10 +232,12 @@ class ExperimentRunner:
         from ..datasets.base import OTBDataset
         from ..datasets.got10k import GOT10kDataset
         from ..datasets.lasot import LaSOTDataset
+        from ..datasets.otb import OTB100Dataset
         from ..datasets.synthetic import SyntheticDataset
 
         loaders = {
             "OTBDataset": OTBDataset,
+            "OTB100Dataset": OTB100Dataset,
             "GOT10kDataset": GOT10kDataset,
             "LaSOTDataset": LaSOTDataset,
             "SyntheticDataset": SyntheticDataset,
@@ -263,6 +265,11 @@ class ExperimentRunner:
         root = cfg["root"]
         if loader_name == "OTBDataset":
             return cls(root=root)
+        if loader_name == "OTB100Dataset":
+            split = cfg.get("split", "otb100")
+            max_seq = cfg.get("max_sequences", None)
+            name = cfg.get("name", None)
+            return cls(root=root, split=split, max_sequences=max_seq, name=name)
         split = cfg.get("split", "val")
         max_seq = cfg.get("max_sequences", None)
         return cls(root=root, split=split, max_sequences=max_seq)
