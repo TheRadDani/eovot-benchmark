@@ -23,7 +23,7 @@ from eovot.trackers.kcf import KCFTracker
 # ---------------------------------------------------------------------------
 
 def _tiny_dataset(n_seq: int = 2, seq_len: int = 20) -> SyntheticDataset:
-    return SyntheticDataset(num_sequences=n_seq, sequence_length=seq_len)
+    return SyntheticDataset(num_sequences=n_seq, num_frames=seq_len)
 
 
 # ---------------------------------------------------------------------------
