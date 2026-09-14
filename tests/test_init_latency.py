@@ -234,8 +234,8 @@ class TestInitLatencySerialization:
         r = self._run_result()
         p = r.save(tmp_path / "result")
         r2 = BenchmarkResult.load(p)
-        assert r2.mean_init_latency_ms == pytest.approx(r.mean_init_latency_ms, rel=1e-3)
+        assert r2.mean_init_latency_ms == pytest.approx(r.mean_init_latency_ms, abs=1e-3)
         for sr_orig, sr_loaded in zip(r.sequence_results, r2.sequence_results):
             assert sr_loaded.profiling.init_latency_ms == pytest.approx(
-                sr_orig.profiling.init_latency_ms, rel=1e-3
+                sr_orig.profiling.init_latency_ms, abs=1e-3
             )
