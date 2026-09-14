@@ -7,6 +7,9 @@ Covers:
   - SweepReport.best_config / best_at_fps_budget / pareto_front queries
   - to_markdown / to_csv / to_dict / save round-trip
   - CLI: scripts/sweep_tracker.py via main()
+  - SweepAxis label / display_name behaviour
+  - SweepResult sensitivity analysis and optimal config selection
+  - HyperparamSweep 1D and 2D end-to-end sweeps
 """
 
 from __future__ import annotations
@@ -21,9 +24,13 @@ import numpy as np
 import pytest
 
 from eovot.analysis.hyperparam_sweep import (
+    HyperparamSweep,
     HyperparamSweeper,
+    SweepAxis,
     SweepEntry,
+    SweepPoint,
     SweepReport,
+    SweepResult,
     _dominates,
     _mark_pareto,
 )
@@ -32,11 +39,22 @@ from eovot.datasets.synthetic import SyntheticDataset
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Shared fixtures
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(scope="module")
+def fast_dataset() -> SyntheticDataset:
+    return SyntheticDataset(
+        num_sequences=3,
+        num_frames=30,
+        frame_size=(320, 240),
+        bbox_size=(30, 30),
+        motion="linear",
+        seed=42,
+    )
+
+
 def _make_entry(success_auc: float, fps: float, params: dict = None) -> SweepEntry:
-    """Create a minimal SweepEntry for unit tests."""
     mock_result = MagicMock(spec=BenchmarkResult)
     return SweepEntry(
         params=params or {},
@@ -55,6 +73,20 @@ def _small_dataset(n_seq=2, n_frames=20):
         frame_size=(160, 120),
         seed=0,
     )
+
+
+# ---------------------------------------------------------------------------
+# SweepAxis tests
+# ---------------------------------------------------------------------------
+
+class TestSweepAxis:
+    def test_label_falls_back_to_param_name(self):
+        ax = SweepAxis("learning_rate", [0.1, 0.2])
+        assert ax.label() == "learning_rate"
+
+    def test_display_name_overrides_param_name(self):
+        ax = SweepAxis("learning_rate", [0.1, 0.2], display_name="LR")
+        assert ax.label() == "LR"
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +152,6 @@ class TestParetoHelpers:
         assert not dominated.is_pareto
 
     def test_mark_pareto_trade_off_both_pareto(self):
-        # High accuracy, low fps vs low accuracy, high fps — neither dominates
         e1 = _make_entry(0.9, 100)
         e2 = _make_entry(0.5, 500)
         entries = [e1, e2]
@@ -129,7 +160,6 @@ class TestParetoHelpers:
         assert e2.is_pareto
 
     def test_mark_pareto_dominated_entry_removed(self):
-        # e3 dominates e1 and e2
         e1 = _make_entry(0.5, 100)
         e2 = _make_entry(0.6, 150)
         e3 = _make_entry(0.8, 400)
@@ -138,6 +168,54 @@ class TestParetoHelpers:
         assert e3.is_pareto
         assert not e1.is_pareto
         assert not e2.is_pareto
+
+
+# ---------------------------------------------------------------------------
+# SweepResult tests
+# ---------------------------------------------------------------------------
+
+class TestSweepResult:
+    def _make_result(self, aucs: list[float]) -> SweepResult:
+        axis = SweepAxis("lr", list(range(len(aucs))))
+        points = [
+            SweepPoint(
+                config={"lr": i},
+                mean_iou=auc,
+                success_auc=auc,
+                precision_auc=auc,
+                fps=100.0,
+                peak_memory_mb=64.0,
+            )
+            for i, auc in enumerate(aucs)
+        ]
+        return SweepResult(tracker_name="TEST", axes=[axis], points=points)
+
+    def test_optimal_config_picks_highest_auc(self):
+        result = self._make_result([0.3, 0.7, 0.5])
+        assert result.optimal_config["lr"] == 1
+
+    def test_sensitivity_zero_for_constant_auc(self):
+        result = self._make_result([0.5, 0.5, 0.5])
+        sens = result.sensitivity
+        assert abs(sens["lr"]) < 1e-9
+
+    def test_sensitivity_positive_for_varying_auc(self):
+        result = self._make_result([0.1, 0.9])
+        sens = result.sensitivity
+        assert sens["lr"] > 0.0
+
+    def test_to_markdown_1d_contains_expected_sections(self):
+        result = self._make_result([0.5, 0.6, 0.7])
+        md = result.to_markdown()
+        assert "Sensitivity" in md
+        assert "Optimal config" in md
+        assert "1D Sweep" in md
+
+    def test_empty_points_returns_zero_sensitivity(self):
+        axis = SweepAxis("lr", [])
+        result = SweepResult(tracker_name="T", axes=[axis], points=[])
+        sens = result.sensitivity
+        assert sens["lr"] == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +245,6 @@ class TestSweepReport:
 
     def test_best_at_fps_budget_filters(self):
         r = self._make_report()
-        # lr=0.05 has 0.80 AUC at 500 fps; should be excluded at fps_min=550
         best = r.best_at_fps_budget(fps_min=550)
         assert best is not None
         assert best.mean_fps >= 550
@@ -280,7 +357,6 @@ class TestHyperparamSweeper:
             {"learning_rate": [0.05, 0.10], "kernel_sigma": [0.3, 0.5]},
             max_sequences=1,
         )
-        # 2 × 2 = 4 combinations
         assert len(report.entries) == 4
 
     def test_sweep_pareto_flags_set(self):
@@ -304,14 +380,11 @@ class TestHyperparamSweeper:
         sweeper = self._sweeper("KCF")
         report = sweeper.sweep({"learning_rate": [0.05, 0.10, 0.15]}, max_sequences=2)
         fps_values = [e.mean_fps for e in report.entries]
-        # A budget above max FPS means no config qualifies
         assert report.best_at_fps_budget(max(fps_values) * 2) is None
-        # A budget below min FPS means all configs qualify
         result = report.best_at_fps_budget(0.0)
         assert result is not None
 
     def test_invalid_tracker_name_produces_empty_report(self):
-        """An unknown tracker name causes all trials to be skipped gracefully."""
         ds = _small_dataset()
         report = HyperparamSweeper("NONEXISTENT", ds, verbose=False).sweep(
             {"lr": [0.1]}, max_sequences=1
@@ -321,12 +394,100 @@ class TestHyperparamSweeper:
 
 
 # ---------------------------------------------------------------------------
+# HyperparamSweep end-to-end tests (use fast synthetic dataset)
+# ---------------------------------------------------------------------------
+
+class TestHyperparamSweep:
+    def test_1d_sweep_returns_correct_point_count(self, fast_dataset):
+        values = [0.05, 0.125, 0.2]
+        sweep = HyperparamSweep(
+            tracker_name="KCF",
+            dataset=fast_dataset,
+            dataset_name="Synthetic",
+            max_sequences=2,
+            verbose=False,
+        )
+        result = sweep.run_1d(SweepAxis("learning_rate", values))
+        assert len(result.points) == len(values)
+
+    def test_1d_sweep_optimal_config_key_present(self, fast_dataset):
+        sweep = HyperparamSweep(
+            tracker_name="KCF",
+            dataset=fast_dataset,
+            dataset_name="Synthetic",
+            max_sequences=2,
+        )
+        result = sweep.run_1d(SweepAxis("learning_rate", [0.05, 0.125, 0.2]))
+        assert "learning_rate" in result.optimal_config
+
+    def test_2d_sweep_returns_correct_point_count(self, fast_dataset):
+        ax0 = SweepAxis("learning_rate", [0.05, 0.125])
+        ax1 = SweepAxis("padding", [1.0, 1.5])
+        sweep = HyperparamSweep(
+            tracker_name="KCF",
+            dataset=fast_dataset,
+            dataset_name="Synthetic",
+            max_sequences=2,
+        )
+        result = sweep.run_2d(ax0, ax1)
+        assert len(result.points) == len(ax0.values) * len(ax1.values)
+
+    def test_2d_sweep_sensitivity_has_both_axes(self, fast_dataset):
+        ax0 = SweepAxis("learning_rate", [0.05, 0.2])
+        ax1 = SweepAxis("padding", [1.0, 2.0])
+        sweep = HyperparamSweep(
+            tracker_name="KCF",
+            dataset=fast_dataset,
+            dataset_name="Synthetic",
+            max_sequences=2,
+        )
+        result = sweep.run_2d(ax0, ax1)
+        sens = result.sensitivity
+        assert "learning_rate" in sens
+        assert "padding" in sens
+
+    def test_2d_sweep_markdown_contains_grid_table(self, fast_dataset):
+        ax0 = SweepAxis("learning_rate", [0.05, 0.125])
+        ax1 = SweepAxis("padding", [1.0, 1.5])
+        sweep = HyperparamSweep(
+            tracker_name="KCF",
+            dataset=fast_dataset,
+            dataset_name="Synthetic",
+            max_sequences=2,
+        )
+        result = sweep.run_2d(ax0, ax1)
+        md = result.to_markdown()
+        assert "2D Sweep" in md
+        assert "learning_rate" in md
+        assert "padding" in md
+
+    def test_empty_axis_raises(self, fast_dataset):
+        sweep = HyperparamSweep(
+            tracker_name="KCF",
+            dataset=fast_dataset,
+            max_sequences=2,
+        )
+        with pytest.raises(ValueError, match="no values"):
+            sweep.run_1d(SweepAxis("learning_rate", []))
+
+    def test_fixed_params_are_forwarded(self, fast_dataset):
+        sweep = HyperparamSweep(
+            tracker_name="KCF",
+            dataset=fast_dataset,
+            dataset_name="Synthetic",
+            max_sequences=2,
+            fixed_params={"lambda_": 1e-4},
+        )
+        result = sweep.run_1d(SweepAxis("learning_rate", [0.075, 0.15]))
+        assert len(result.points) == 2
+
+
+# ---------------------------------------------------------------------------
 # CLI smoke test
 # ---------------------------------------------------------------------------
 
 class TestCLI:
     def test_cli_runs_with_synthetic_config(self, tmp_path):
-        """CLI produces Markdown, CSV, and JSON outputs without errors."""
         import yaml
 
         config = {
