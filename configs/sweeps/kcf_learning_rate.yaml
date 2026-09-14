@@ -1,0 +1,35 @@
+# KCF learning-rate hyperparameter sweep
+#
+# Sweeps the learning_rate parameter of KCF over a dense grid to find the
+# setting that maximises success AUC while maintaining a target FPS floor.
+#
+# Run with:
+#   python scripts/sweep_tracker.py \
+#       --config configs/sweeps/kcf_learning_rate.yaml \
+#       --output-dir results/sweeps/kcf
+
+tracker:
+  name: KCF
+  # Parameters held fixed across all sweep trials.
+  base_params: {}
+
+sweep:
+  # One entry per parameter; values are the candidate settings to try.
+  # Full Cartesian product is evaluated when multiple parameters are listed.
+  param_grid:
+    learning_rate: [0.025, 0.05, 0.075, 0.10, 0.125, 0.15, 0.175, 0.20]
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-linear
+  # Offline synthetic sequences — no download required.
+  num_sequences: 10
+  num_frames: 100
+  frame_size: [320, 240]
+  motion: linear
+  seed: 42
+
+# Optional: set to the device CPU TDP in Watts to enable energy profiling.
+# Leave null to skip energy estimation.
+profiling:
+  tdp_watts: null

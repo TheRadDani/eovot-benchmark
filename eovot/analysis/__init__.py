@@ -2,6 +2,15 @@
 
 from .skip_analysis import FrameSkipAnalyzer, SkipRateResult
 from .resolution_analysis import ResolutionScaleAnalyzer, ScaleResult, ScaleEntry
+from .hyperparam_sweep import (
+    HyperparamSweep,
+    SweepAxis,
+    SweepResult,
+    SweepPoint,
+    HyperparamSweeper,
+    SweepReport,
+    SweepEntry,
+)
 
 __all__ = [
     "FrameSkipAnalyzer",
@@ -9,4 +18,11 @@ __all__ = [
     "ResolutionScaleAnalyzer",
     "ScaleResult",
     "ScaleEntry",
+    "HyperparamSweep",
+    "SweepAxis",
+    "SweepResult",
+    "SweepPoint",
+    "HyperparamSweeper",
+    "SweepReport",
+    "SweepEntry",
 ]

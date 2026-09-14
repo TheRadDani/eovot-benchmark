@@ -1,0 +1,31 @@
+# MOSSE multi-parameter sweep (learning_rate × regularization)
+#
+# Demonstrates a 2-D grid search. The Cartesian product of the two lists
+# gives 4 × 4 = 16 configurations. A Pareto-front analysis then shows which
+# settings dominate on accuracy AND speed simultaneously.
+#
+# Run with:
+#   python scripts/sweep_tracker.py \
+#       --config configs/sweeps/mosse_multi_param.yaml \
+#       --max-sequences 5  # faster preview
+
+tracker:
+  name: MOSSE
+  base_params: {}
+
+sweep:
+  param_grid:
+    learning_rate: [0.05, 0.10, 0.15, 0.20]
+    regularization: [0.001, 0.01, 0.1, 1.0]
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-circular
+  num_sequences: 8
+  num_frames: 80
+  frame_size: [320, 240]
+  motion: circular
+  seed: 7
+
+profiling:
+  tdp_watts: null
