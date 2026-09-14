@@ -198,7 +198,7 @@ class TestInitLatencySerialization:
         r = self._run_result()
         d = r.to_dict()
         r2 = BenchmarkResult.from_dict(d)
-        assert r2.mean_init_latency_ms == pytest.approx(r.mean_init_latency_ms, rel=1e-3)
+        assert r2.mean_init_latency_ms == pytest.approx(r.mean_init_latency_ms, abs=1e-3)
 
     def test_from_dict_old_format_defaults_to_zero(self):
         """Files written before init-latency tracking omit the field; default must be 0.0."""
