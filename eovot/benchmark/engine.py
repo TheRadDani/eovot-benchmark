@@ -76,6 +76,27 @@ class BenchmarkResult:
         return float(np.mean([r.profiling.fps for r in self.sequence_results]))
 
     @property
+    def mean_init_latency_ms(self) -> float:
+        """Mean tracker initialisation latency across sequences (ms).
+
+        Returns 0.0 when no sequences have been run or when the result was
+        loaded from a file produced before init-latency tracking was added.
+        """
+        vals = [r.profiling.init_latency_ms for r in self.sequence_results]
+        return float(np.mean(vals)) if vals else 0.0
+
+    @property
+    def mean_cold_start_ratio(self) -> float:
+        """Mean ratio of init time to per-frame update time across sequences.
+
+        A value of 5.0 means the tracker spends as long initialising once as
+        it does on 5 update frames.  High ratios penalise trackers that must
+        frequently re-initialise after target loss.
+        """
+        ratios = [r.profiling.cold_start_ratio for r in self.sequence_results]
+        return float(np.mean(ratios)) if ratios else 0.0
+
+    @property
     def peak_memory_mb(self) -> float:
         return float(np.max([r.profiling.peak_memory_mb for r in self.sequence_results]))
 
@@ -124,6 +145,8 @@ class BenchmarkResult:
             "mean_iou": round(self.mean_iou, 4),
             "mean_fps": round(self.mean_fps, 2),
             "peak_memory_mb": round(self.peak_memory_mb, 2),
+            "mean_init_latency_ms": round(self.mean_init_latency_ms, 3),
+            "mean_cold_start_ratio": round(self.mean_cold_start_ratio, 4),
         }
         mcd = self.mean_center_distance
         if mcd is not None:
@@ -169,6 +192,8 @@ class BenchmarkResult:
                 "latency_p99_ms": round(p.latency_p99_ms, 3),
                 "latency_cv": round(p.latency_cv, 6),
                 "peak_memory_mb": round(p.peak_memory_mb, 2),
+                "init_latency_ms": round(p.init_latency_ms, 3),
+                "cold_start_ratio": round(p.cold_start_ratio, 4),
             }
             if r.accuracy_metrics is not None:
                 entry["success_auc"] = round(r.accuracy_metrics.success_auc, 4)
@@ -194,6 +219,7 @@ class BenchmarkResult:
         base = (
             f"BenchmarkResult[{s['tracker']} on {s['dataset']}] "
             f"mIoU={s['mean_iou']}  FPS={s['mean_fps']}  "
+            f"init={s['mean_init_latency_ms']} ms  "
             f"mem={s['peak_memory_mb']} MiB  ({s['num_sequences']} sequences)"
         )
         if "total_energy_j" in s:
@@ -285,6 +311,7 @@ class BenchmarkResult:
             lat_p95: float = float(seq.get("latency_p95_ms", lat_ms))
             lat_p99: float = float(seq.get("latency_p99_ms", lat_ms))
             lat_cv: float = float(seq.get("latency_cv", 0.0))
+            init_lat_ms: float = float(seq.get("init_latency_ms", 0.0))
 
             profiling = ProfilingResult(
                 tracker_name=tracker_name,
@@ -296,6 +323,7 @@ class BenchmarkResult:
                 latency_p99_ms=lat_p99,
                 latency_cv=lat_cv,
                 peak_memory_mb=mem_mb,
+                init_latency_ms=init_lat_ms,
             )
 
             accuracy: Optional[AccuracyMetrics] = None
@@ -417,7 +445,9 @@ class BenchmarkEngine:
 
         for i, frame in enumerate(frames):
             if i == 0:
+                self._profiler.start_init()
                 tracker.initialize(frame, seq.init_bbox)
+                self._profiler.end_init()
                 preds.append(seq.init_bbox)
             else:
                 self._profiler.start_frame()
