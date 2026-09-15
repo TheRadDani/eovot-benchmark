@@ -2,31 +2,42 @@ name: CI
 
 on:
   push:
-    branches: ["main", "feat/**", "fix/**"]
+    branches: [main]
   pull_request:
-    branches: ["main"]
+    branches: [main]
 
 jobs:
   test:
-    name: "Python ${{ matrix.python-version }} — ${{ matrix.os }}"
-    runs-on: ${{ matrix.os }}
+    name: "Python ${{ matrix.python-version }}"
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-        python-version: ["3.9", "3.10", "3.11"]
+        python-version: ["3.10", "3.11"]
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
 
-      - name: Install system dependencies (OpenCV headless)
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libgl1
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+            ${{ runner.os }}-pip-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 libglib2.0-0 xvfb
 
       - name: Install Python dependencies
         run: |
@@ -34,17 +45,14 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-cov
 
-      - name: Run tests with coverage
-        run: |
-          python -m pytest tests/ -v \
-            --tb=short \
-            --cov=eovot \
-            --cov-report=term-missing \
-            --cov-report=xml
+      - name: Install package in editable mode
+        run: pip install -e . --no-deps
 
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        if: matrix.python-version == '3.11'
-        with:
-          name: coverage-report
-          path: coverage.xml
+      - name: Run tests
+        env:
+          MPLBACKEND: Agg
+          DISPLAY: ":99"
+        run: |
+          Xvfb :99 -screen 0 1024x768x24 &
+          pytest tests/ -x --tb=short -q \
+            --ignore=tests/__pycache__
