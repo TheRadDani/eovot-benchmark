@@ -1,0 +1,57 @@
+# Edge-Device Pareto Study
+#
+# Runs all classical trackers on the synthetic dataset, then computes the
+# multi-objective Pareto frontier (accuracy vs. latency vs. memory) to
+# identify which trackers are optimal under different edge-device constraints.
+#
+# Usage:
+#   python scripts/run_experiment.py --config configs/experiments/edge_pareto_study.yaml
+#
+# After the run, load the saved JSON files and pass them to the Pareto
+# analysis script:
+#   python scripts/pareto_frontier.py results/edge_pareto_study/ \
+#       --hypervolume \
+#       --max-latency 33   # Raspberry Pi 4 budget
+
+experiment:
+  name: edge_pareto_study
+  description: >
+    Multi-tracker evaluation for edge-device Pareto frontier analysis.
+    Identifies Pareto-optimal trackers in accuracy-latency-memory space
+    and supports constraint-based best-tracker selection for three
+    representative edge-device latency budgets.
+
+dataset:
+  type: synthetic
+  num_sequences: 10
+  sequence_length: 150
+  resolution: [480, 640]
+  motion: random_walk
+  seed: 42
+
+trackers:
+  - name: mosse
+    type: MOSSETracker
+  - name: kcf
+    type: KCFTracker
+  - name: camshift
+    type: CamShiftTracker
+  - name: csrt
+    type: CSRTTracker
+
+benchmark:
+  verbose: true
+  max_sequences: null
+
+# Edge-device latency budgets for best_under_latency() queries (milliseconds).
+# These are representative targets; adjust to match your deployment hardware.
+edge_device_budgets:
+  raspberry_pi_4_fps30: 33.3
+  jetson_nano_fps50:    20.0
+  laptop_fps100:        10.0
+
+output:
+  save_results: true
+  results_dir: results/edge_pareto_study
+  save_html_report: true
+  report_path: results/edge_pareto_study/report.html
