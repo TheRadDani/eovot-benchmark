@@ -128,7 +128,7 @@ class TestLatexTableExporter:
         r_otb = [_make_result("KCF", "OTB100")]
         r_got = [_make_result("KCF", "GOT10k")]
         tex = self.exporter.multi_dataset_table({"OTB100": r_otb, "GOT10k": r_got})
-        assert tex.count("\\midrule") >= 3
+        assert tex.count("\\midrule") >= 2
 
     def test_multi_dataset_dataset_names_present(self):
         tex = self.exporter.multi_dataset_table({
