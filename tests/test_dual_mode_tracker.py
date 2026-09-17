@@ -279,7 +279,7 @@ class TestIntegration:
         from eovot.datasets.synthetic import SyntheticDataset
         from eovot.benchmark.engine import BenchmarkEngine
 
-        dataset = SyntheticDataset(num_sequences=2, frames_per_sequence=20)
+        dataset = SyntheticDataset(num_sequences=2, num_frames=20)
         engine = BenchmarkEngine(verbose=False)
 
         fast = FakeTracker("fast", return_bbox=(10, 10, 50, 50))
@@ -296,7 +296,7 @@ class TestIntegration:
         from eovot.datasets.synthetic import SyntheticDataset
         from eovot.benchmark.engine import BenchmarkEngine
 
-        dataset = SyntheticDataset(num_sequences=1, frames_per_sequence=30)
+        dataset = SyntheticDataset(num_sequences=1, num_frames=30)
         engine = BenchmarkEngine(verbose=False)
 
         fast = FakeTracker("fast")
