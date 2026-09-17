@@ -1,0 +1,37 @@
+# EOVOT DualModeTracker Demo Config
+# ==================================
+# This config runs the baseline comparison between a fast tracker (MOSSE),
+# an accurate tracker (KCF), on a synthetic dataset without downloading any
+# external tracking data.
+#
+# For the full DualModeTracker comparison (including DualMode itself and
+# latency compliance tables), use the dedicated CLI:
+#
+#   python scripts/compare_dual_mode.py \
+#       --fast MOSSE --accurate KCF \
+#       --budget-ms 33.3 \
+#       --sequences 5 --frames 60
+#
+# To run just this config through the experiment runner:
+#   python scripts/run_experiment.py \
+#       --config configs/experiments/dual_mode_demo.yaml \
+#       --output results/dual_mode_demo/
+
+dataset:
+  name: SyntheticDataset
+  sequences: 5
+  frames: 60
+  width: 320
+  height: 240
+  motion: linear
+
+trackers:
+  MOSSE: {}
+  KCF: {}
+  CamShift: {}
+
+engine:
+  verbose: true
+
+output:
+  leaderboard: true
