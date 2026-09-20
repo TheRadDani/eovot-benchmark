@@ -1,0 +1,32 @@
+# Joint skip-rate × resolution-scale optimization sweep
+#
+# Run with:
+#   python scripts/joint_optimize.py \
+#       --tracker KCF \
+#       --synthetic --sequences 5 --frames 50 \
+#       --skip-rates 1 2 3 4 \
+#       --scale-factors 1.0 0.75 0.5 0.25 \
+#       --min-iou 0.70
+
+# Which tracker to benchmark
+tracker: KCF
+
+# Dataset source
+dataset:
+  type: synthetic      # Use SyntheticDataset (no downloads required)
+  num_sequences: 5
+  frames_per_sequence: 50
+  motion: linear       # linear | circular | random
+
+# 2-D sweep axes
+sweep:
+  skip_rates: [1, 2, 3, 4]              # Frame skip rates to evaluate
+  scale_factors: [1.0, 0.75, 0.5, 0.25] # Spatial resolution scale factors
+
+# Deployment constraints for optimal config selection
+constraints:
+  min_iou: 0.70   # Minimum acceptable mean IoU
+  min_fps: 0.0    # Minimum acceptable FPS (0 = no constraint)
+
+# Output
+output_dir: results/joint_optimization
