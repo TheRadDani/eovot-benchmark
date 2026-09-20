@@ -422,7 +422,7 @@ class TestBenchmarkIntegration:
         from eovot.trackers.mosse import MOSSETracker
 
         dataset = SyntheticDataset(
-            num_sequences=2, frames_per_sequence=15, seed=42
+            num_sequences=2, num_frames=15, seed=42
         )
         base    = MOSSETracker()
         tracker = BudgetAdaptiveTracker(base, budget_ms=50.0, max_skip=3)
@@ -439,7 +439,7 @@ class TestBenchmarkIntegration:
         from eovot.trackers.mosse import MOSSETracker
 
         dataset = SyntheticDataset(
-            num_sequences=2, frames_per_sequence=20, seed=7
+            num_sequences=2, num_frames=20, seed=7
         )
         # Use an impossibly tight budget to force adaptation
         base    = MOSSETracker()
@@ -460,7 +460,7 @@ class TestBenchmarkIntegration:
         from eovot.trackers.mosse import MOSSETracker
 
         dataset = SyntheticDataset(
-            num_sequences=2, frames_per_sequence=15, seed=99
+            num_sequences=2, num_frames=15, seed=99
         )
         base     = MOSSETracker()
         baseline = BenchmarkEngine(verbose=False).run(
