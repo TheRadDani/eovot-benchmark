@@ -332,7 +332,7 @@ class TestBenchmarkIntegration:
         from eovot.datasets.synthetic import SyntheticDataset
         from eovot.trackers.mosse import MOSSETracker
 
-        dataset  = SyntheticDataset(num_sequences=2, num_frames=15, seed=3)
+        dataset  = SyntheticDataset(num_sequences=2, num_frames=15, seed=3, motion="circular")
         engine   = BenchmarkEngine(verbose=False)
         analyzer = JointOptimizationAnalyzer(engine)
         result   = analyzer.analyze(
@@ -351,7 +351,7 @@ class TestBenchmarkIntegration:
 
         skips  = [1, 2]
         scales = [1.0, 0.5]
-        dataset  = SyntheticDataset(num_sequences=2, num_frames=15, seed=4)
+        dataset  = SyntheticDataset(num_sequences=2, num_frames=15, seed=4, motion="circular")
         engine   = BenchmarkEngine(verbose=False)
         analyzer = JointOptimizationAnalyzer(engine)
         result   = analyzer.analyze(
