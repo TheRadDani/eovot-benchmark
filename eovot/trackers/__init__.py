@@ -6,6 +6,7 @@ from .lk_optical_flow import LKOpticalFlowTracker
 from .median_flow import MedianFlowTracker
 from .mil import MILTracker
 from .camshift import CamShiftTracker
+from .adaptive_budget import BudgetAdaptiveTracker, AdaptationEvent
 from .registry import TRACKER_REGISTRY, available_trackers, build_tracker
 
 __all__ = [
@@ -18,6 +19,8 @@ __all__ = [
     "MedianFlowTracker",
     "MILTracker",
     "CamShiftTracker",
+    "BudgetAdaptiveTracker",
+    "AdaptationEvent",
     "TRACKER_REGISTRY",
     "available_trackers",
     "build_tracker",
