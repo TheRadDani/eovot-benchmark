@@ -1,0 +1,40 @@
+# MOSSE hyperparameter sweep on the synthetic dataset.
+#
+# Explores learning_rate × sigma to identify configurations that
+# maximise mIoU (or FPS) under edge deployment constraints.
+#
+# No dataset download required — runs against the built-in
+# SyntheticDataset generator out of the box.
+#
+# Usage (offline, no dataset required):
+#   python scripts/run_sweep.py configs/experiments/mosse_sweep.yaml \
+#       --output-dir results/sweeps/mosse
+#
+# Rank by FPS instead of accuracy:
+#   python scripts/run_sweep.py configs/experiments/mosse_sweep.yaml \
+#       --primary-metric mean_fps --output-dir results/sweeps/mosse-fps
+#
+# With a real OTB dataset:
+#   python scripts/run_sweep.py configs/experiments/mosse_sweep.yaml \
+#       --dataset-root /data/OTB100 --output-dir results/sweeps/mosse-otb
+
+sweep:
+  tracker: MOSSE
+  primary_metric: mean_iou    # rank by accuracy; use mean_fps for speed
+  tdp_watts: null             # set to device TDP (e.g. 5.0) to enable energy
+
+# Cartesian product: 6 learning_rate × 4 sigma = 24 combinations.
+# learning_rate: EMA weight for the online filter update (0 = frozen, 1 = replace).
+# sigma: std-dev of the Gaussian target response initialised on frame 1.
+param_grid:
+  learning_rate: [0.05, 0.075, 0.10, 0.125, 0.175, 0.25]
+  sigma: [1.0, 1.5, 2.0, 3.0]
+
+dataset:
+  loader: SyntheticDataset
+  name: synthetic-linear
+  num_sequences: 5
+  num_frames: 60
+  frame_size: [320, 240]
+  motion: linear              # linear | circular | random
+  seed: 42

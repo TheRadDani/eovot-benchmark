@@ -1,0 +1,39 @@
+# KCF hyperparameter sweep on the synthetic dataset.
+#
+# KCF (Kernelized Correlation Filter) has two key hyperparameters:
+#   learning_rate  — EMA weight for online template/filter update
+#   kernel_sigma   — bandwidth of the Gaussian (RBF) kernel; smaller = sharper peak
+#
+# This sweep identifies Pareto-optimal (accuracy ↔ FPS) configurations
+# for edge deployment by evaluating all 12 combinations.
+#
+# Usage (synthetic, no download needed):
+#   python scripts/run_sweep.py configs/experiments/kcf_sweep.yaml \
+#       --output-dir results/sweeps/kcf
+#
+# With GOT-10k val split:
+#   python scripts/run_sweep.py configs/experiments/kcf_sweep.yaml \
+#       --dataset-root /data/got10k --output-dir results/sweeps/kcf-got10k
+#
+# Rank by FPS to find the fastest viable config:
+#   python scripts/run_sweep.py configs/experiments/kcf_sweep.yaml \
+#       --primary-metric mean_fps --output-dir results/sweeps/kcf-fps
+
+sweep:
+  tracker: KCF
+  primary_metric: mean_iou
+  tdp_watts: null
+
+# Cartesian product: 4 learning_rate × 3 kernel_sigma = 12 combinations.
+param_grid:
+  learning_rate: [0.05, 0.075, 0.125, 0.20]
+  kernel_sigma: [0.25, 0.5, 1.0]
+
+dataset:
+  loader: SyntheticDataset
+  name: synthetic-linear
+  num_sequences: 5
+  num_frames: 60
+  frame_size: [320, 240]
+  motion: linear
+  seed: 42
