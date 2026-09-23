@@ -1,0 +1,39 @@
+# Warm-up / cold-start analysis configuration
+#
+# Compare how quickly different trackers reach steady-state throughput
+# on a synthetic dataset.  No real data download required.
+#
+# Run with:
+#   python scripts/analyze_warmup.py \
+#       --tracker MOSSE --synthetic --sequences 5 --frames 200
+#
+# Or run the full multi-tracker comparison manually:
+#   for t in MOSSE KCF CamShift; do
+#     python scripts/analyze_warmup.py --tracker $t --synthetic \
+#         --sequences 5 --frames 200 --output-json results/${t}_warmup.json
+#   done
+
+analysis:
+  type: warmup
+  ema_alpha: 0.10          # EMA smoothing; lower = smoother, slower to react
+  tolerance: 0.10          # +-10% band around steady-state mean
+  min_steady_frames: 10    # minimum frames required in steady-state window
+
+dataset:
+  type: SyntheticDataset
+  num_sequences: 5
+  num_frames: 200
+  motion: linear           # linear | circular | random
+  seed: 42
+
+trackers:
+  - name: MOSSE
+  - name: KCF
+  - name: CamShift
+
+# Expected output (approximate — values vary by hardware):
+#
+# Tracker | Init (ms) | Warmup Frames | Steady FPS | Speedup
+# MOSSE   | ~0.5      | 0-3           | ~2000      | ~1.0x
+# KCF     | ~1.0      | 2-8           | ~600       | ~1.1x
+# CamShift| ~0.3      | 0-2           | ~1500      | ~1.0x
