@@ -1,0 +1,40 @@
+# Edge deployment budget profiles for EOVOT hardware-constrained analysis.
+# Use with: python scripts/budget_analysis.py <results.json...> --min-fps 15
+
+experiment:
+  name: edge_deployment
+  description: >
+    Hardware-constrained tracker selection for edge devices.
+    Each profile defines the minimum FPS and maximum resource limits
+    for a specific class of edge hardware.
+
+budgets:
+  raspberry_pi_4:
+    label: "Raspberry Pi 4 (4 GB)"
+    min_fps: 15.0
+    max_latency_ms: 66.7
+    max_latency_p95_ms: 100.0
+    max_memory_mb: 512.0
+    max_energy_mj_per_frame: 5.0
+
+  jetson_nano:
+    label: "NVIDIA Jetson Nano"
+    min_fps: 25.0
+    max_latency_ms: 40.0
+    max_latency_p95_ms: 60.0
+    max_memory_mb: 1024.0
+    max_energy_mj_per_frame: 10.0
+
+  mcu_class:
+    label: "MCU-class device (e.g. STM32H7)"
+    min_fps: 5.0
+    max_latency_ms: 200.0
+    max_latency_p95_ms: 300.0
+    max_memory_mb: 8.0
+    max_energy_mj_per_frame: 0.5
+
+  desktop_gpu:
+    label: "Desktop workstation / cloud GPU"
+    min_fps: 60.0
+    max_latency_ms: 16.7
+    max_memory_mb: 8192.0
