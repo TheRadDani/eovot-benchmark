@@ -11,6 +11,7 @@ import numpy as np
 
 from ..datasets.base import BaseDataset, Sequence
 from ..metrics.accuracy import AccuracyMetrics, MetricsEngine
+from ..metrics.robustness import RobustnessAnalyzer, RobustnessResult
 from ..profiling.energy import EnergyProfiler, EnergyResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
@@ -26,6 +27,7 @@ class SequenceResult:
     center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
     energy: Optional[EnergyResult] = None          # energy estimate; None when TDP not configured
     accuracy_metrics: Optional[AccuracyMetrics] = None  # success AUC, precision AUC
+    robustness: Optional[RobustnessResult] = None  # failure count, EAO, survival rate
 
     @property
     def mean_iou(self) -> float:
@@ -116,6 +118,30 @@ class BenchmarkResult:
                 if r.accuracy_metrics is not None]
         return float(np.mean(aucs)) if aucs else None
 
+    @property
+    def mean_eao(self) -> Optional[float]:
+        """Mean Expected Average Overlap across all sequences, or ``None`` if not computed.
+
+        EAO combines accuracy and robustness into one scalar: it is the mean
+        IoU over all non-burn-in frames regardless of failure recovery.
+        """
+        eaos = [r.robustness.eao for r in self.sequence_results if r.robustness is not None]
+        return float(np.mean(eaos)) if eaos else None
+
+    @property
+    def total_failures(self) -> Optional[int]:
+        """Total tracking failures across all sequences, or ``None`` if not computed."""
+        counts = [r.robustness.num_failures for r in self.sequence_results
+                  if r.robustness is not None]
+        return int(sum(counts)) if counts else None
+
+    @property
+    def mean_survival_rate(self) -> Optional[float]:
+        """Mean fraction of non-burn-in frames where IoU ≥ failure threshold."""
+        rates = [r.robustness.survival_rate for r in self.sequence_results
+                 if r.robustness is not None]
+        return float(np.mean(rates)) if rates else None
+
     def summary(self) -> Dict:
         d: Dict = {
             "tracker": self.tracker_name,
@@ -143,6 +169,15 @@ class BenchmarkResult:
         e_frame = self.mean_energy_per_frame_mj
         if e_frame is not None:
             d["mean_energy_per_frame_mj"] = round(e_frame, 4)
+        eao = self.mean_eao
+        if eao is not None:
+            d["mean_eao"] = round(eao, 4)
+        failures = self.total_failures
+        if failures is not None:
+            d["total_failures"] = failures
+        survival = self.mean_survival_rate
+        if survival is not None:
+            d["mean_survival_rate"] = round(survival, 4)
         return d
 
     def to_dict(self) -> Dict:
@@ -186,6 +221,11 @@ class BenchmarkResult:
                 entry["ious"] = [round(float(v), 6) for v in r.ious]
             if r.center_distances is not None and len(r.center_distances) > 0:
                 entry["center_distances"] = [round(float(v), 3) for v in r.center_distances]
+            if r.robustness is not None:
+                entry["eao"] = round(r.robustness.eao, 4)
+                entry["num_failures"] = r.robustness.num_failures
+                entry["survival_rate"] = round(r.robustness.survival_rate, 4)
+                entry["mean_recovery_lag"] = round(r.robustness.mean_recovery_lag, 2)
             sequences.append(entry)
         return {"summary": self.summary(), "sequences": sequences}
 
@@ -265,6 +305,7 @@ class BenchmarkResult:
         from ..profiling.profiler import ProfilingResult
         from ..profiling.energy import EnergyResult
         from ..metrics.accuracy import AccuracyMetrics
+        from ..metrics.robustness import RobustnessResult
 
         summary = d["summary"]
         tracker_name: str = summary.get("tracker") or summary.get("tracker_name", "unknown")
@@ -320,6 +361,19 @@ class BenchmarkResult:
                     mean_cpu_pct=float(seq.get("energy_mean_cpu_pct", 0.0)),
                 )
 
+            robustness: Optional[RobustnessResult] = None
+            if "eao" in seq:
+                robustness = RobustnessResult(
+                    tracker_name=tracker_name,
+                    sequence_name=seq_name,
+                    num_failures=int(seq.get("num_failures", 0)),
+                    failure_frames=[],
+                    recovery_lags=[],
+                    mean_recovery_lag=float(seq.get("mean_recovery_lag", 0.0)),
+                    eao=float(seq["eao"]),
+                    survival_rate=float(seq.get("survival_rate", 0.0)),
+                )
+
             seq_results.append(
                 SequenceResult(
                     sequence_name=seq_name,
@@ -328,6 +382,7 @@ class BenchmarkResult:
                     center_distances=dists,
                     energy=energy,
                     accuracy_metrics=accuracy,
+                    robustness=robustness,
                 )
             )
 
@@ -361,6 +416,7 @@ class BenchmarkEngine:
         self.verbose = verbose
         self._metrics = MetricsEngine()
         self._profiler = Profiler()
+        self._robustness = RobustnessAnalyzer()
         self._energy_profiler: Optional[EnergyProfiler] = (
             EnergyProfiler(tdp_watts=tdp_watts) if tdp_watts is not None else None
         )
@@ -392,11 +448,18 @@ class BenchmarkEngine:
                 sauc_str = ""
                 if seq_result.accuracy_metrics is not None:
                     sauc_str = f"  AUC={seq_result.accuracy_metrics.success_auc:.3f}"
+                rob_str = ""
+                if seq_result.robustness is not None:
+                    rob_str = (
+                        f"  EAO={seq_result.robustness.eao:.3f}"
+                        f"  fail={seq_result.robustness.num_failures}"
+                    )
                 print(
                     f"  [{idx + 1:>3}/{n}] {seq_result.sequence_name:<30s} "
                     f"mIoU={seq_result.mean_iou:.3f}  "
                     f"FPS={seq_result.profiling.fps:.1f}"
                     f"{sauc_str}"
+                    f"{rob_str}"
                     f"{energy_str}"
                 )
 
@@ -449,6 +512,10 @@ class BenchmarkEngine:
             except ValueError:
                 pass  # sequence too short (0 update frames)
 
+        robustness = self._robustness.analyze_sequence(
+            ious, tracker_name=tracker.name, sequence_name=seq.name
+        )
+
         return SequenceResult(
             sequence_name=seq.name,
             ious=ious,
@@ -458,4 +525,5 @@ class BenchmarkEngine:
             center_distances=dists,
             energy=energy,
             accuracy_metrics=accuracy,
+            robustness=robustness,
         )
