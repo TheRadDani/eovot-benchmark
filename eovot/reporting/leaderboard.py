@@ -59,13 +59,16 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 #: Default ordered list of metrics to include in leaderboard tables.
 #: Each entry: (column_key, display_name, higher_is_better, format_string)
 DEFAULT_COLUMNS: List[Tuple[str, str, bool, str]] = [
-    ("mean_iou",              "mIoU",        True,  ".4f"),
-    ("success_auc",           "Succ. AUC",   True,  ".4f"),
-    ("precision_auc",         "Prec. AUC",   True,  ".4f"),
-    ("mean_fps",              "FPS",         True,  ".1f"),
-    ("peak_memory_mb",        "Mem (MiB)",   False, ".1f"),
-    ("total_energy_j",        "Energy (J)",  False, ".3f"),
-    ("mean_center_distance_px", "Ctr Dist",  False, ".2f"),
+    ("mean_iou",              "mIoU",           True,  ".4f"),
+    ("success_auc",           "Succ. AUC",      True,  ".4f"),
+    ("precision_auc",         "Prec. AUC",      True,  ".4f"),
+    ("mean_eao",              "EAO",            True,  ".4f"),
+    ("mean_survival_rate",    "Survival",       True,  ".4f"),
+    ("total_failures",        "Failures",       False, ".0f"),
+    ("mean_fps",              "FPS",            True,  ".1f"),
+    ("peak_memory_mb",        "Mem (MiB)",      False, ".1f"),
+    ("total_energy_j",        "Energy (J)",     False, ".3f"),
+    ("mean_center_distance_px", "Ctr Dist",     False, ".2f"),
 ]
 
 
