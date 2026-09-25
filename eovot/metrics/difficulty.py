@@ -1,476 +1,373 @@
-"""Sequence difficulty scoring for stratified VOT benchmarking.
+"""Sequence difficulty scoring from ground-truth bounding-box annotations.
 
-Computes a per-sequence difficulty score from ground-truth bounding-box
-trajectories — no visual features required.  Four orthogonal difficulty
-dimensions are measured and fused into a single scalar in ``[0, 1]``:
+Ranks tracking sequences by inherent challenge without running any tracker,
+using six factors derived purely from ground-truth box sequences.
 
-+---------------------+------------------------------------------------------+
-| Dimension           | What it captures                                     |
-+=====================+======================================================+
-| motion_score        | Mean frame-to-frame GT displacement / box diagonal.  |
-|                     | High value → fast or erratic target motion.          |
-+---------------------+------------------------------------------------------+
-| scale_score         | log(max GT area / min GT area), normalised to [0,1]. |
-|                     | High value → dramatic scale change across sequence.  |
-+---------------------+------------------------------------------------------+
-| aspect_score        | Coefficient of variation of w/h ratio.               |
-|                     | High value → frequent deformation / rotation.        |
-+---------------------+------------------------------------------------------+
-| length_score        | Sigmoid of sequence length (frames).                 |
-|                     | High value → long sequence; more failure chances.    |
-+---------------------+------------------------------------------------------+
+Factors (all normalised to [0, 1], higher = harder)
+----------------------------------------------------
+- **motion_speed** -- mean inter-frame displacement of the target centre,
+  normalised by the frame diagonal (or the median box diagonal when no
+  frame size is provided).
+- **scale_change** -- coefficient of variation of target area; captures
+  sequences where the target grows or shrinks dramatically.
+- **aspect_ratio_change** -- coefficient of variation of target w/h ratio;
+  high when the target deforms (e.g. a person sits down or a car turns).
+- **small_target** -- fraction of frames where target area is below 5% of
+  the frame area; small targets are notoriously hard for feature-based trackers.
+- **out_of_view_risk** -- fraction of frames where the target box touches a
+  frame boundary; proxies for partial or full out-of-view events.
+- **deformation** -- 1 - mean(consecutive-frame IoU on GT boxes); high when
+  the GT box shape changes substantially between frames.
 
-Overall score (default weights):
+All six factors are combined with configurable weights into a scalar
+``difficulty_score`` in ``[0, 1]``.
 
-    overall = 0.40 × motion + 0.30 × scale + 0.15 × aspect + 0.15 × length
+Example::
 
-Difficulty tiers:
+    from eovot.datasets.synthetic import SyntheticDataset
+    from eovot.metrics.difficulty import score_dataset
 
-    easy   →  overall < 0.35
-    medium →  0.35 ≤ overall < 0.65
-    hard   →  overall ≥ 0.65
-
-Stratified benchmarking groups sequences by tier and reports per-tier mean
-accuracy, enabling researchers to isolate where trackers succeed or struggle.
-
-Typical usage::
-
-    import numpy as np
-    from eovot.metrics.difficulty import SequenceDifficultyAnalyzer
-
-    gt = np.array([[x, y, w, h], ...])   # (N, 4) ground-truth boxes
-    analyzer = SequenceDifficultyAnalyzer()
-    diff = analyzer.score_sequence(gt, sequence_name="car1")
-    print(diff)
-    # SequenceDifficulty[car1] tier=hard  overall=0.728  (motion=0.81 scale=0.64 aspect=0.21 length=0.68)
-
-    # Full benchmark stratification
-    from eovot.benchmark.engine import BenchmarkResult
-    report = analyzer.stratified_report(benchmark_result)
+    ds = SyntheticDataset(num_sequences=5, motion="random")
+    report = score_dataset(ds, frame_size=(240, 320))
     print(report.to_markdown())
+    print("Hardest:", report.hardest(1)[0].sequence_name)
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, TYPE_CHECKING
+from dataclasses import asdict, dataclass
+from typing import Dict, Iterator, List, Optional, Tuple
 
 import numpy as np
 
-if TYPE_CHECKING:
-    from ..benchmark.engine import BenchmarkResult
-
-# ---------------------------------------------------------------------------
-# Defaults
-# ---------------------------------------------------------------------------
-
-#: Default per-dimension weights for overall difficulty score.
-DEFAULT_WEIGHTS = {
-    "motion": 0.40,
-    "scale": 0.30,
-    "aspect": 0.15,
-    "length": 0.15,
-}
-
-#: Length (frames) at which the sigmoid-based length score equals 0.5.
-LENGTH_MIDPOINT = 300
-
-TIER_EASY_THRESHOLD = 0.35
-TIER_HARD_THRESHOLD = 0.65
-
-
-# ---------------------------------------------------------------------------
-# Per-sequence difficulty
-# ---------------------------------------------------------------------------
 
 @dataclass
-class SequenceDifficulty:
-    """Difficulty profile for a single tracking sequence.
+class DifficultyFactors:
+    """Per-sequence difficulty factors and aggregate score.
 
-    Attributes:
-        sequence_name: Human-readable identifier.
-        motion_score:  Normalised mean displacement (0 = stationary, 1 = very fast).
-        scale_score:   Normalised scale variation (0 = fixed size, 1 = extreme change).
-        aspect_score:  Coefficient of variation of w/h ratio, capped at 1.
-        length_score:  Sigmoid of sequence length — proxy for sustained difficulty.
-        overall_score: Weighted combination of the four scores (see module docs).
-        tier:          ``"easy"``, ``"medium"``, or ``"hard"``.
-        num_frames:    Number of frames in the sequence.
+    All fields are in ``[0, 1]``; 1.0 = maximum difficulty for that factor.
     """
 
-    sequence_name: str
-    motion_score: float
-    scale_score: float
-    aspect_score: float
-    length_score: float
-    overall_score: float
-    tier: str
-    num_frames: int
+    motion_speed: float = 0.0
+    scale_change: float = 0.0
+    aspect_ratio_change: float = 0.0
+    small_target: float = 0.0
+    out_of_view_risk: float = 0.0
+    deformation: float = 0.0
+    difficulty_score: float = 0.0
+
+    def to_dict(self) -> Dict[str, float]:
+        """Return a ``{name: value}`` dict with values rounded to 4 dp."""
+        return {k: round(float(v), 4) for k, v in asdict(self).items()}
 
     def __str__(self) -> str:
         return (
-            f"SequenceDifficulty[{self.sequence_name}] "
-            f"tier={self.tier}  overall={self.overall_score:.3f}  "
-            f"(motion={self.motion_score:.2f} "
-            f"scale={self.scale_score:.2f} "
-            f"aspect={self.aspect_score:.2f} "
-            f"length={self.length_score:.2f})"
+            f"DifficultyFactors("
+            f"score={self.difficulty_score:.3f}, "
+            f"motion={self.motion_speed:.3f}, "
+            f"scale={self.scale_change:.3f}, "
+            f"aspect={self.aspect_ratio_change:.3f}, "
+            f"small={self.small_target:.3f}, "
+            f"oov={self.out_of_view_risk:.3f}, "
+            f"deform={self.deformation:.3f})"
         )
 
-    def to_dict(self) -> dict:
-        return {
-            "sequence_name": self.sequence_name,
-            "num_frames": self.num_frames,
-            "tier": self.tier,
-            "overall_score": round(self.overall_score, 4),
-            "motion_score": round(self.motion_score, 4),
-            "scale_score": round(self.scale_score, 4),
-            "aspect_score": round(self.aspect_score, 4),
-            "length_score": round(self.length_score, 4),
-        }
 
-
-# ---------------------------------------------------------------------------
-# Stratified report
-# ---------------------------------------------------------------------------
-
-@dataclass
-class StratifiedReport:
-    """Per-tier accuracy breakdown for a benchmark run.
-
-    Attributes:
-        tracker_name:   Name of the evaluated tracker.
-        dataset_name:   Name of the evaluated dataset.
-        difficulties:   Per-sequence :class:`SequenceDifficulty` objects.
-        tier_stats:     Mapping from tier name to per-tier statistics dict.
-    """
-
-    tracker_name: str
-    dataset_name: str
-    difficulties: List[SequenceDifficulty]
-    tier_stats: Dict[str, Dict]
-
-    def to_markdown(self) -> str:
-        """Render a Markdown table summarising per-tier accuracy.
-
-        Returns:
-            Multi-line string with a Markdown table and a summary of sequence
-            counts per tier.
-        """
-        header = (
-            f"## Difficulty-Stratified Results: {self.tracker_name} on {self.dataset_name}\n\n"
-        )
-        col_names = ["Tier", "Sequences", "Mean IoU", "Success AUC", "FPS"]
-        row_fmt = "| {:<8} | {:>9} | {:>8} | {:>11} | {:>6} |"
-        sep = "| " + " | ".join(["---"] * len(col_names)) + " |"
-        header_row = "| " + " | ".join(f"{c}" for c in col_names) + " |"
-
-        rows = [header, header_row, sep]
-        for tier in ("easy", "medium", "hard"):
-            stats = self.tier_stats.get(tier, {})
-            n = stats.get("num_sequences", 0)
-            miou = f"{stats['mean_iou']:.4f}" if "mean_iou" in stats else "—"
-            sauc = f"{stats['success_auc']:.4f}" if "success_auc" in stats else "—"
-            fps = f"{stats['mean_fps']:.1f}" if "mean_fps" in stats else "—"
-            rows.append(row_fmt.format(tier.capitalize(), n, miou, sauc, fps))
-
-        rows.append("")
-        tier_counts = {t: sum(1 for d in self.difficulties if d.tier == t)
-                       for t in ("easy", "medium", "hard")}
-        rows.append(
-            f"> Tier thresholds: easy < {TIER_EASY_THRESHOLD}, "
-            f"hard ≥ {TIER_HARD_THRESHOLD}. "
-            f"Counts: easy={tier_counts['easy']}, "
-            f"medium={tier_counts['medium']}, hard={tier_counts['hard']}."
-        )
-        return "\n".join(rows)
-
-
-# ---------------------------------------------------------------------------
-# Analyzer
-# ---------------------------------------------------------------------------
-
-class SequenceDifficultyAnalyzer:
-    """Score the tracking difficulty of sequences from ground-truth boxes.
+class SequenceDifficultyScorer:
+    """Compute per-sequence difficulty factors from GT bounding boxes.
 
     Args:
-        weights: Override default dimension weights.  Keys must be a subset
-            of ``{"motion", "scale", "aspect", "length"}``.  Missing keys use
-            defaults; weights are renormalised to sum to 1.
-        length_midpoint: Sequence length (frames) at which the length score
-            equals 0.5.  Default: ``300`` (typical medium-length sequence).
+        frame_size: ``(height, width)`` of video frames.  Required for
+            ``small_target`` (percentage of frame area) and
+            ``out_of_view_risk`` (boundary proximity).  When ``None`` those
+            two factors use fallback estimates.
+        weights: Mapping from factor keys to non-negative floats.  Valid keys:
+            ``"motion"``, ``"scale"``, ``"aspect"``, ``"small"``,
+            ``"oov"``, ``"deform"``.  Values are L1-normalised internally
+            so they need not sum to 1.
+
+    Raises:
+        ValueError: If *weights* contains unknown keys or all weights are zero.
 
     Example::
 
-        analyzer = SequenceDifficultyAnalyzer()
-        diff = analyzer.score_sequence(gt_boxes, sequence_name="dog1")
-        print(diff.tier)  # "medium"
+        scorer = SequenceDifficultyScorer(frame_size=(480, 640))
+        factors = scorer.score(sequence.ground_truth)
+        print(factors.difficulty_score)
     """
+
+    _WEIGHT_KEYS = ("motion", "scale", "aspect", "small", "oov", "deform")
+
+    _DEFAULT_WEIGHTS: Dict[str, float] = {
+        "motion": 0.25,
+        "scale": 0.20,
+        "aspect": 0.10,
+        "small": 0.20,
+        "oov": 0.15,
+        "deform": 0.10,
+    }
 
     def __init__(
         self,
+        frame_size: Optional[Tuple[int, int]] = None,
         weights: Optional[Dict[str, float]] = None,
-        length_midpoint: int = LENGTH_MIDPOINT,
     ) -> None:
-        w = dict(DEFAULT_WEIGHTS)
-        if weights:
-            w.update(weights)
-        total = sum(w.values())
-        self._weights = {k: v / total for k, v in w.items()}
-        self._length_midpoint = length_midpoint
+        self.frame_size = frame_size
+        raw = dict(weights or self._DEFAULT_WEIGHTS)
+        unknown = set(raw) - set(self._WEIGHT_KEYS)
+        if unknown:
+            raise ValueError(f"Unknown weight keys: {sorted(unknown)!r}")
+        total = sum(raw.values())
+        if total <= 0.0:
+            raise ValueError("Weights must sum to a positive value.")
+        self._w: Dict[str, float] = {k: raw.get(k, 0.0) / total for k in self._WEIGHT_KEYS}
 
-    # ------------------------------------------------------------------
-    # Public interface
-    # ------------------------------------------------------------------
-
-    def score_sequence(
-        self,
-        gt_boxes: np.ndarray,
-        sequence_name: str = "",
-    ) -> SequenceDifficulty:
-        """Compute the difficulty profile for a single sequence.
+    def score(self, gt_boxes: np.ndarray) -> DifficultyFactors:
+        """Compute difficulty factors from a sequence's ground-truth array.
 
         Args:
-            gt_boxes:      ``(N, 4)`` array of ground-truth boxes ``(x, y, w, h)``.
-            sequence_name: Human-readable identifier embedded in the result.
+            gt_boxes: ``(N, 4)`` float array of boxes in ``(x, y, w, h)``
+                format.  Must have at least 2 rows.
 
         Returns:
-            :class:`SequenceDifficulty` with all scores populated.
+            :class:`DifficultyFactors` with all six factor values and the
+            aggregate ``difficulty_score`` populated.
 
         Raises:
-            ValueError: If ``gt_boxes`` has fewer than 2 frames.
+            ValueError: If *gt_boxes* shape is not ``(N, 4)`` with N >= 2.
         """
         gt = np.asarray(gt_boxes, dtype=np.float64)
         if gt.ndim != 2 or gt.shape[1] != 4:
-            raise ValueError(f"gt_boxes must be (N, 4), got shape {gt.shape}")
+            raise ValueError(
+                f"gt_boxes must have shape (N, 4), got {gt.shape}"
+            )
         if len(gt) < 2:
-            raise ValueError("score_sequence requires at least 2 GT frames.")
+            raise ValueError(
+                "Need at least 2 frames to compute difficulty factors."
+            )
 
-        motion = self._motion_score(gt)
-        scale = self._scale_score(gt)
-        aspect = self._aspect_score(gt)
-        length = self._length_score(len(gt))
+        motion = float(np.clip(self._motion_speed(gt), 0.0, 1.0))
+        scale = float(np.clip(self._scale_change(gt), 0.0, 1.0))
+        aspect = float(np.clip(self._aspect_ratio_change(gt), 0.0, 1.0))
+        small = float(np.clip(self._small_target(gt), 0.0, 1.0))
+        oov = float(np.clip(self._out_of_view_risk(gt), 0.0, 1.0))
+        deform = float(np.clip(self._deformation(gt), 0.0, 1.0))
 
-        w = self._weights
-        overall = (
-            w["motion"] * motion
-            + w["scale"] * scale
-            + w["aspect"] * aspect
-            + w["length"] * length
-        )
-        overall = float(np.clip(overall, 0.0, 1.0))
-        tier = _assign_tier(overall)
-
-        return SequenceDifficulty(
-            sequence_name=sequence_name,
-            motion_score=round(motion, 4),
-            scale_score=round(scale, 4),
-            aspect_score=round(aspect, 4),
-            length_score=round(length, 4),
-            overall_score=round(overall, 4),
-            tier=tier,
-            num_frames=len(gt),
+        agg = (
+            self._w["motion"] * motion
+            + self._w["scale"] * scale
+            + self._w["aspect"] * aspect
+            + self._w["small"] * small
+            + self._w["oov"] * oov
+            + self._w["deform"] * deform
         )
 
-    def score_dataset(
-        self,
-        sequences_gt: Dict[str, np.ndarray],
-    ) -> List[SequenceDifficulty]:
-        """Score every sequence in a dataset.
-
-        Args:
-            sequences_gt: Mapping ``{sequence_name: gt_boxes}``.
-
-        Returns:
-            List of :class:`SequenceDifficulty` objects, one per sequence.
-        """
-        results = []
-        for name, gt in sequences_gt.items():
-            try:
-                results.append(self.score_sequence(gt, sequence_name=name))
-            except ValueError:
-                pass  # skip sequences with < 2 frames
-        return results
-
-    def stratified_report(
-        self,
-        benchmark_result: "BenchmarkResult",
-    ) -> StratifiedReport:
-        """Group a :class:`~eovot.benchmark.engine.BenchmarkResult` by difficulty tier.
-
-        Sequences that lack ground-truth boxes in the result are scored from
-        the stored per-frame IoU array (fallback: motion is not computable,
-        so only length is used).
-
-        Args:
-            benchmark_result: Full benchmark result with per-sequence data.
-
-        Returns:
-            :class:`StratifiedReport` with per-tier mean IoU, success AUC,
-            and FPS computed from the sequences in each tier.
-        """
-        from ..benchmark.engine import SequenceResult
-
-        difficulties: Dict[str, SequenceDifficulty] = {}
-        for sr in benchmark_result.sequence_results:
-            if sr.ground_truths is not None and len(sr.ground_truths) >= 2:
-                diff = self.score_sequence(sr.ground_truths, sequence_name=sr.sequence_name)
-            else:
-                # Fallback: length-only score
-                n = len(sr.ious)
-                length = self._length_score(n)
-                overall = float(np.clip(self._weights["length"] * length, 0.0, 1.0))
-                diff = SequenceDifficulty(
-                    sequence_name=sr.sequence_name,
-                    motion_score=0.0,
-                    scale_score=0.0,
-                    aspect_score=0.0,
-                    length_score=round(length, 4),
-                    overall_score=round(overall, 4),
-                    tier=_assign_tier(overall),
-                    num_frames=n,
-                )
-            difficulties[sr.sequence_name] = diff
-
-        # Group sequence results by tier
-        tier_results: Dict[str, List[SequenceResult]] = {
-            "easy": [], "medium": [], "hard": []
-        }
-        for sr in benchmark_result.sequence_results:
-            tier = difficulties.get(sr.sequence_name, SequenceDifficulty(
-                sequence_name=sr.sequence_name,
-                motion_score=0.0, scale_score=0.0, aspect_score=0.0,
-                length_score=0.0, overall_score=0.0, tier="easy", num_frames=0,
-            )).tier
-            tier_results[tier].append(sr)
-
-        # Compute per-tier statistics
-        tier_stats: Dict[str, Dict] = {}
-        for tier, srs in tier_results.items():
-            if not srs:
-                tier_stats[tier] = {"num_sequences": 0}
-                continue
-            all_ious = np.concatenate([r.ious for r in srs]) if any(len(r.ious) for r in srs) else np.array([])
-            mean_iou = float(all_ious.mean()) if len(all_ious) else 0.0
-            mean_fps = float(np.mean([r.profiling.fps for r in srs]))
-
-            aucs = [r.accuracy_metrics.success_auc for r in srs if r.accuracy_metrics is not None]
-            success_auc = float(np.mean(aucs)) if aucs else None
-
-            stat: Dict = {
-                "num_sequences": len(srs),
-                "mean_iou": round(mean_iou, 4),
-                "mean_fps": round(mean_fps, 2),
-            }
-            if success_auc is not None:
-                stat["success_auc"] = round(success_auc, 4)
-            tier_stats[tier] = stat
-
-        return StratifiedReport(
-            tracker_name=benchmark_result.tracker_name,
-            dataset_name=benchmark_result.dataset_name,
-            difficulties=list(difficulties.values()),
-            tier_stats=tier_stats,
+        return DifficultyFactors(
+            motion_speed=round(motion, 4),
+            scale_change=round(scale, 4),
+            aspect_ratio_change=round(aspect, 4),
+            small_target=round(small, 4),
+            out_of_view_risk=round(oov, 4),
+            deformation=round(deform, 4),
+            difficulty_score=round(min(float(agg), 1.0), 4),
         )
 
     # ------------------------------------------------------------------
-    # Dimension scoring helpers
+    # Individual factor computations (vectorised NumPy, no external deps)
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _motion_score(gt: np.ndarray) -> float:
-        """Normalised mean frame-to-frame centre displacement.
+    def _motion_speed(self, gt: np.ndarray) -> float:
+        cx = gt[:, 0] + gt[:, 2] / 2.0
+        cy = gt[:, 1] + gt[:, 3] / 2.0
+        disps = np.sqrt(np.diff(cx) ** 2 + np.diff(cy) ** 2)
+        mean_disp = float(disps.mean())
+        if self.frame_size is not None:
+            h, w = self.frame_size
+            ref = math.sqrt(h ** 2 + w ** 2) * 0.10  # 10% of diagonal = max
+        else:
+            ref = float(np.sqrt(gt[:, 2] ** 2 + gt[:, 3] ** 2).mean()) * 0.5
+        return mean_disp / max(ref, 1e-6)
 
-        Computes the Euclidean distance between consecutive GT centres,
-        normalises each displacement by the geometric mean of the GT box
-        size (diagonal proxy), and maps the result to ``[0, 1]`` via a
-        sigmoid-like transform with midpoint at 0.3 (30 % of box diagonal
-        per frame ≈ moderate fast motion).
-
-        Args:
-            gt: ``(N, 4)`` GT boxes ``(x, y, w, h)``.
-
-        Returns:
-            Float in ``[0, 1]``.
-        """
-        centres = gt[:, :2] + gt[:, 2:] / 2.0  # (N, 2)
-        disps = np.sqrt(np.sum(np.diff(centres, axis=0) ** 2, axis=1))  # (N-1,)
-        diagonals = np.sqrt(gt[:, 2] ** 2 + gt[:, 3] ** 2)  # (N,)
-        mean_diag = float(np.mean(diagonals)) + 1e-6
-        norm_disp = float(np.mean(disps)) / mean_diag
-        # Logistic with midpoint 0.30 (30 % of box diagonal / frame)
-        score = 1.0 / (1.0 + math.exp(-10.0 * (norm_disp - 0.30)))
-        return float(np.clip(score, 0.0, 1.0))
-
-    @staticmethod
-    def _scale_score(gt: np.ndarray) -> float:
-        """Normalised log area ratio: log(max_area / min_area).
-
-        Maps the log ratio to ``[0, 1]`` by dividing by ``log(100)``
-        (a 100× area change is considered maximal difficulty).
-
-        Args:
-            gt: ``(N, 4)`` GT boxes ``(x, y, w, h)``.
-
-        Returns:
-            Float in ``[0, 1]``.
-        """
+    def _scale_change(self, gt: np.ndarray) -> float:
         areas = gt[:, 2] * gt[:, 3]
-        valid = areas[areas > 0]
-        if len(valid) < 2:
+        mean_area = float(areas.mean())
+        if mean_area < 1.0:
             return 0.0
-        ratio = float(valid.max()) / float(valid.min())
-        score = math.log(max(ratio, 1.0)) / math.log(100.0)
-        return float(np.clip(score, 0.0, 1.0))
+        cv = float(areas.std()) / mean_area  # coefficient of variation
+        return cv / 0.5  # 50% CoV maps to difficulty=1
 
-    @staticmethod
-    def _aspect_score(gt: np.ndarray) -> float:
-        """Coefficient of variation of the width/height aspect ratio.
-
-        High CV means the aspect ratio changes substantially across the
-        sequence — typical of out-of-plane rotation or non-rigid deformation.
-
-        Args:
-            gt: ``(N, 4)`` GT boxes ``(x, y, w, h)``.
-
-        Returns:
-            Float in ``[0, 1]`` (CV capped at 1.0).
-        """
-        h = gt[:, 3]
-        valid_h = h > 0
-        if not np.any(valid_h):
+    def _aspect_ratio_change(self, gt: np.ndarray) -> float:
+        valid = gt[:, 3] > 0
+        if not valid.any():
             return 0.0
-        aspect = gt[valid_h, 2] / gt[valid_h, 3]
-        mean_asp = float(np.mean(aspect))
-        if mean_asp < 1e-6:
+        ratios = gt[valid, 2] / np.maximum(gt[valid, 3], 1e-6)
+        mean_r = float(ratios.mean())
+        if mean_r < 1e-6:
             return 0.0
-        cv = float(np.std(aspect)) / mean_asp
-        return float(np.clip(cv, 0.0, 1.0))
+        cv = float(ratios.std()) / mean_r
+        return cv / 0.30  # 30% CoV maps to difficulty=1
 
-    def _length_score(self, num_frames: int) -> float:
-        """Sigmoid-based length score.
+    def _small_target(self, gt: np.ndarray) -> float:
+        areas = gt[:, 2] * gt[:, 3]
+        if self.frame_size is not None:
+            h, w = self.frame_size
+            threshold = 0.05 * h * w
+        else:
+            threshold = 0.01 * float(np.median(areas))
+        return float((areas < threshold).mean())
 
-        Returns 0.5 when ``num_frames == length_midpoint``, approaching 1 for
-        very long sequences and 0 for very short ones.
+    def _out_of_view_risk(self, gt: np.ndarray) -> float:
+        if self.frame_size is None:
+            return 0.0
+        h, w = self.frame_size
+        margin = 5.0
+        at_boundary = (
+            (gt[:, 0] <= margin)
+            | (gt[:, 1] <= margin)
+            | ((gt[:, 0] + gt[:, 2]) >= (w - margin))
+            | ((gt[:, 1] + gt[:, 3]) >= (h - margin))
+        )
+        return float(at_boundary.mean())
 
-        Args:
-            num_frames: Total frames in the sequence.
+    def _deformation(self, gt: np.ndarray) -> float:
+        """1 - mean(consecutive-frame IoU on GT boxes)."""
+        prev = gt[:-1]
+        curr = gt[1:]
+        ix1 = np.maximum(prev[:, 0], curr[:, 0])
+        iy1 = np.maximum(prev[:, 1], curr[:, 1])
+        ix2 = np.minimum(prev[:, 0] + prev[:, 2], curr[:, 0] + curr[:, 2])
+        iy2 = np.minimum(prev[:, 1] + prev[:, 3], curr[:, 1] + curr[:, 3])
+        inter = np.maximum(0.0, ix2 - ix1) * np.maximum(0.0, iy2 - iy1)
+        union = prev[:, 2] * prev[:, 3] + curr[:, 2] * curr[:, 3] - inter
+        valid = (
+            (prev[:, 2] > 0) & (prev[:, 3] > 0)
+            & (curr[:, 2] > 0) & (curr[:, 3] > 0)
+            & (union > 0)
+        )
+        ious = np.where(valid, inter / np.maximum(union, 1e-9), 0.0)
+        mean_iou = float(ious.mean()) if len(ious) > 0 else 1.0
+        return 1.0 - mean_iou
 
-        Returns:
-            Float in ``(0, 1)``.
-        """
-        x = (num_frames - self._length_midpoint) / (self._length_midpoint * 0.5)
-        return float(1.0 / (1.0 + math.exp(-x)))
+
+@dataclass
+class SequenceDifficultyEntry:
+    """Difficulty score and factors for a single named sequence."""
+
+    sequence_name: str
+    factors: DifficultyFactors
+
+    @property
+    def difficulty_score(self) -> float:
+        return self.factors.difficulty_score
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
+class DifficultyReport:
+    """Ranked sequence difficulty report.
 
-def _assign_tier(overall: float) -> str:
-    if overall < TIER_EASY_THRESHOLD:
-        return "easy"
-    if overall < TIER_HARD_THRESHOLD:
-        return "medium"
-    return "hard"
+    Sequences are sorted descending by ``difficulty_score`` on construction.
+
+    Args:
+        entries: One :class:`SequenceDifficultyEntry` per sequence.
+
+    Example::
+
+        report = DifficultyReport(entries)
+        print(report.to_markdown())
+        for entry in report.hardest(3):
+            print(entry.sequence_name, entry.difficulty_score)
+    """
+
+    def __init__(self, entries: List[SequenceDifficultyEntry]) -> None:
+        self.entries = sorted(
+            entries, key=lambda e: e.difficulty_score, reverse=True
+        )
+
+    def __len__(self) -> int:
+        return len(self.entries)
+
+    def __iter__(self) -> Iterator[SequenceDifficultyEntry]:
+        return iter(self.entries)
+
+    def __repr__(self) -> str:
+        if not self.entries:
+            return "DifficultyReport(empty)"
+        top = self.entries[0]
+        return (
+            f"DifficultyReport({len(self.entries)} sequences, "
+            f"hardest={top.sequence_name!r} score={top.difficulty_score:.3f})"
+        )
+
+    def hardest(self, n: int = 10) -> List[SequenceDifficultyEntry]:
+        """Return the *n* hardest sequences (highest difficulty score)."""
+        return self.entries[:n]
+
+    def easiest(self, n: int = 10) -> List[SequenceDifficultyEntry]:
+        """Return the *n* easiest sequences (lowest difficulty score), easiest first."""
+        return list(reversed(self.entries[-n:]))
+
+    def to_markdown(self) -> str:
+        """Render the ranked difficulty table as a Markdown string."""
+        header = (
+            "| Rank | Sequence                 | Score "
+            "| Motion | Scale | Aspect | Small |   OOV | Deform |"
+        )
+        sep = (
+            "|------|--------------------------|-------"
+            "|--------|-------|--------|-------|-------|--------|"
+        )
+        rows = [header, sep]
+        for rank, entry in enumerate(self.entries, 1):
+            f = entry.factors
+            rows.append(
+                f"| {rank:>4} | {entry.sequence_name:<24} "
+                f"| {f.difficulty_score:.3f} "
+                f"| {f.motion_speed:.3f}  "
+                f"| {f.scale_change:.3f} "
+                f"| {f.aspect_ratio_change:.3f}  "
+                f"| {f.small_target:.3f} "
+                f"| {f.out_of_view_risk:.3f} "
+                f"| {f.deformation:.3f}  |"
+            )
+        return "\n".join(rows)
+
+    def to_dict(self) -> List[Dict]:
+        """Serialise all entries to a list of dicts for JSON export."""
+        return [
+            {"sequence": e.sequence_name, **e.factors.to_dict()}
+            for e in self.entries
+        ]
+
+
+def score_dataset(
+    dataset,
+    frame_size: Optional[Tuple[int, int]] = None,
+    scorer: Optional[SequenceDifficultyScorer] = None,
+) -> DifficultyReport:
+    """Score every sequence in *dataset* and return a ranked report.
+
+    Args:
+        dataset: Any :class:`~eovot.datasets.base.BaseDataset` instance.
+        frame_size: ``(height, width)`` passed to
+            :class:`SequenceDifficultyScorer` when *scorer* is ``None``.
+        scorer: Optional pre-configured scorer; when given, *frame_size*
+            is ignored.
+
+    Returns:
+        :class:`DifficultyReport` with all sequences ranked by difficulty.
+
+    Example::
+
+        from eovot.datasets.synthetic import SyntheticDataset
+        from eovot.metrics.difficulty import score_dataset
+
+        report = score_dataset(SyntheticDataset(num_sequences=10), frame_size=(240, 320))
+        print(report.to_markdown())
+    """
+    if scorer is None:
+        scorer = SequenceDifficultyScorer(frame_size=frame_size)
+    entries: List[SequenceDifficultyEntry] = []
+    for seq in dataset:
+        factors = scorer.score(seq.ground_truth)
+        entries.append(SequenceDifficultyEntry(sequence_name=seq.name, factors=factors))
+    return DifficultyReport(entries)
