@@ -7,11 +7,12 @@ also supplied.
 
 Usage examples::
 
-    # Score all sequences in an OTB dataset
+    # Score all sequences in an OTB dataset (240×320 frames)
     python scripts/analyze_difficulty.py \\
-        --dataset-root /data/OTB100
+        --dataset-root /data/OTB100 \\
+        --frame-height 240 --frame-width 320
 
-    # Score with custom output directory
+    # Save CSV and JSON output
     python scripts/analyze_difficulty.py \\
         --dataset-root /data/OTB100 \\
         --output-dir results/difficulty/
@@ -26,7 +27,7 @@ Usage examples::
         --dataset-loader GOT10kDataset \\
         --dataset-root /data/GOT-10k \\
         --split val \\
-        --output-dir results/difficulty/
+        --frame-height 480 --frame-width 640
 """
 
 from __future__ import annotations
@@ -42,7 +43,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from eovot.datasets.base import OTBDataset
 from eovot.datasets.got10k import GOT10kDataset
 from eovot.datasets.lasot import LaSOTDataset
-from eovot.metrics.difficulty import SequenceDifficultyAnalyzer
+from eovot.metrics.difficulty import (
+    SequenceDifficultyScorer,
+    score_dataset,
+    stratify_benchmark_result,
+)
 
 DATASET_REGISTRY = {
     "OTBDataset": OTBDataset,
@@ -54,7 +59,10 @@ DATASET_REGISTRY = {
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="analyze_difficulty",
-        description="Score tracking sequences by difficulty and (optionally) produce stratified reports.",
+        description=(
+            "Score tracking sequences by difficulty and "
+            "produce difficulty-stratified reports."
+        ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--dataset-root", required=True, help="Path to dataset root.")
@@ -67,28 +75,37 @@ def main() -> None:
     parser.add_argument("--split", default="val", help="Split for GOT-10k / LaSOT.")
     parser.add_argument("--max-sequences", type=int, default=None)
     parser.add_argument(
+        "--frame-height", type=int, default=None,
+        help="Frame height in pixels (enables small_target and out-of-view scoring).",
+    )
+    parser.add_argument(
+        "--frame-width", type=int, default=None,
+        help="Frame width in pixels.",
+    )
+    parser.add_argument(
         "--output-dir",
         default="results/difficulty/",
-        help="Directory for CSV and JSON output.",
+        help="Directory for CSV, JSON, and Markdown output.",
     )
     parser.add_argument(
         "--benchmark-json",
         default=None,
-        help="Path to a BenchmarkResult JSON file (enables stratified accuracy report).",
+        help="Path to a BenchmarkResult JSON (enables difficulty-stratified accuracy report).",
     )
     args = parser.parse_args()
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    frame_size = None
+    if args.frame_height and args.frame_width:
+        frame_size = (args.frame_height, args.frame_width)
+
     # -------------------------------------------------------------------
-    # Load dataset and extract GT boxes
+    # Load dataset
     # -------------------------------------------------------------------
     cls = DATASET_REGISTRY[args.dataset_loader]
-    if args.dataset_loader == "GOT10kDataset":
-        dataset = cls(root=args.dataset_root, split=args.split,
-                      max_sequences=args.max_sequences)
-    elif args.dataset_loader == "LaSOTDataset":
+    if args.dataset_loader in ("GOT10kDataset", "LaSOTDataset"):
         dataset = cls(root=args.dataset_root, split=args.split,
                       max_sequences=args.max_sequences)
     else:
@@ -97,21 +114,18 @@ def main() -> None:
     n = min(len(dataset), args.max_sequences) if args.max_sequences else len(dataset)
     print(f"Loaded {n} sequences from {args.dataset_root}")
 
-    sequences_gt = {}
-    for i in range(n):
-        seq = dataset[i]
-        sequences_gt[seq.name] = seq.ground_truth
-
     # -------------------------------------------------------------------
     # Score sequences
     # -------------------------------------------------------------------
-    analyzer = SequenceDifficultyAnalyzer()
-    difficulties = analyzer.score_dataset(sequences_gt)
-    difficulties.sort(key=lambda d: d.overall_score, reverse=True)
+    scorer = SequenceDifficultyScorer(frame_size=frame_size)
+    report = score_dataset(dataset, scorer=scorer)
 
-    print(f"\nScored {len(difficulties)} sequences")
-    tier_counts = {t: sum(1 for d in difficulties if d.tier == t)
-                   for t in ("easy", "medium", "hard")}
+    tier_counts = {"easy": 0, "medium": 0, "hard": 0}
+    from eovot.metrics.difficulty import _assign_tier
+    for entry in report:
+        tier_counts[_assign_tier(entry.difficulty_score)] += 1
+
+    print(f"\nScored {len(report)} sequences")
     print(f"  easy={tier_counts['easy']}  medium={tier_counts['medium']}  hard={tier_counts['hard']}")
 
     # -------------------------------------------------------------------
@@ -119,12 +133,14 @@ def main() -> None:
     # -------------------------------------------------------------------
     csv_path = out_dir / "difficulty_scores.csv"
     with open(csv_path, "w", newline="") as fh:
-        fieldnames = ["sequence_name", "tier", "overall_score", "motion_score",
-                      "scale_score", "aspect_score", "length_score", "num_frames"]
+        fieldnames = ["sequence", "difficulty_score", "motion_speed", "scale_change",
+                      "aspect_ratio_change", "small_target", "out_of_view_risk", "deformation"]
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
-        for d in difficulties:
-            writer.writerow(d.to_dict())
+        for entry in report:
+            row = {"sequence": entry.sequence_name}
+            row.update(entry.factors.to_dict())
+            writer.writerow({k: row.get(k, "") for k in fieldnames})
     print(f"\nDifficulty CSV → {csv_path}")
 
     # -------------------------------------------------------------------
@@ -132,27 +148,28 @@ def main() -> None:
     # -------------------------------------------------------------------
     json_path = out_dir / "difficulty_scores.json"
     with open(json_path, "w") as fh:
-        json.dump([d.to_dict() for d in difficulties], fh, indent=2)
+        json.dump(report.to_dict(), fh, indent=2)
     print(f"Difficulty JSON → {json_path}")
 
     # -------------------------------------------------------------------
-    # Print top-10 hardest sequences
+    # Print top-10 hardest
     # -------------------------------------------------------------------
     print("\nTop-10 hardest sequences:")
-    print(f"{'Name':<35} {'Tier':<8} {'Overall':>7} {'Motion':>7} {'Scale':>6} {'Frames':>7}")
-    print("-" * 75)
-    for d in difficulties[:10]:
-        print(f"{d.sequence_name:<35} {d.tier:<8} {d.overall_score:>7.4f} "
-              f"{d.motion_score:>7.4f} {d.scale_score:>6.4f} {d.num_frames:>7}")
+    print(f"{'Name':<35} {'Score':>6} {'Motion':>7} {'Scale':>6}")
+    print("-" * 60)
+    for entry in report.hardest(10):
+        f = entry.factors
+        print(f"{entry.sequence_name:<35} {f.difficulty_score:>6.4f} "
+              f"{f.motion_speed:>7.4f} {f.scale_change:>6.4f}")
 
     # -------------------------------------------------------------------
-    # Optional: stratified accuracy report from benchmark JSON
+    # Optional: stratified accuracy report
     # -------------------------------------------------------------------
     if args.benchmark_json:
         from eovot.benchmark.engine import BenchmarkResult
         bench = BenchmarkResult.load(args.benchmark_json)
-        report = analyzer.stratified_report(bench)
-        md = report.to_markdown()
+        strat_report = stratify_benchmark_result(bench, frame_size=frame_size, scorer=scorer)
+        md = strat_report.to_markdown()
         md_path = out_dir / "stratified_report.md"
         md_path.write_text(md)
         print(f"\nStratified report → {md_path}")

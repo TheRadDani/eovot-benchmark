@@ -16,9 +16,14 @@ from .attributes import (
     SequenceAttributes,
 )
 from .difficulty import (
-    SequenceDifficulty,
-    SequenceDifficultyAnalyzer,
-    StratifiedReport,
+    DifficultyFactors,
+    SequenceDifficultyScorer,
+    SequenceDifficultyEntry,
+    DifficultyReport,
+    score_dataset,
+    TierStats,
+    StratifiedBenchmarkReport,
+    stratify_benchmark_result,
     TIER_EASY_THRESHOLD,
     TIER_HARD_THRESHOLD,
 )
@@ -30,13 +35,6 @@ from .statistical import (
     WilcoxonResult,
     PairwiseSummary,
     StatisticalTestEngine,
-)
-from .difficulty import (
-    DifficultyFactors,
-    SequenceDifficultyScorer,
-    SequenceDifficultyEntry,
-    DifficultyReport,
-    score_dataset,
 )
 
 __all__ = [
@@ -50,9 +48,14 @@ __all__ = [
     "AttributeDetector",
     "AttributePerformanceTable",
     "SequenceAttributes",
-    "SequenceDifficulty",
-    "SequenceDifficultyAnalyzer",
-    "StratifiedReport",
+    "DifficultyFactors",
+    "SequenceDifficultyScorer",
+    "SequenceDifficultyEntry",
+    "DifficultyReport",
+    "score_dataset",
+    "TierStats",
+    "StratifiedBenchmarkReport",
+    "stratify_benchmark_result",
     "TIER_EASY_THRESHOLD",
     "TIER_HARD_THRESHOLD",
     "RobustnessAnalyzer",
@@ -65,9 +68,4 @@ __all__ = [
     "WilcoxonResult",
     "PairwiseSummary",
     "StatisticalTestEngine",
-    "DifficultyFactors",
-    "SequenceDifficultyScorer",
-    "SequenceDifficultyEntry",
-    "DifficultyReport",
-    "score_dataset",
 ]

@@ -371,3 +371,257 @@ def score_dataset(
         factors = scorer.score(seq.ground_truth)
         entries.append(SequenceDifficultyEntry(sequence_name=seq.name, factors=factors))
     return DifficultyReport(entries)
+
+
+# ---------------------------------------------------------------------------
+# Tier thresholds (canonical across stratified analysis utilities)
+# ---------------------------------------------------------------------------
+
+#: Upper boundary for the "easy" tier (exclusive).
+TIER_EASY_THRESHOLD: float = 0.35
+
+#: Lower boundary for the "hard" tier (inclusive).
+TIER_HARD_THRESHOLD: float = 0.65
+
+
+def _assign_tier(score: float) -> str:
+    if score < TIER_EASY_THRESHOLD:
+        return "easy"
+    if score < TIER_HARD_THRESHOLD:
+        return "medium"
+    return "hard"
+
+
+# ---------------------------------------------------------------------------
+# Stratified benchmark analysis
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TierStats:
+    """Per-difficulty-tier accuracy and efficiency summary.
+
+    Attributes:
+        tier:          Difficulty label: ``"easy"``, ``"medium"``, or ``"hard"``.
+        num_sequences: Number of sequences in this tier.
+        mean_iou:      Mean IoU across all frames in the tier (or 0 if empty).
+        mean_fps:      Mean throughput across sequences in the tier.
+        success_auc:   Mean success-curve AUC (``None`` if not computed).
+        precision_auc: Mean precision AUC (``None`` if not computed).
+    """
+
+    tier: str
+    num_sequences: int
+    mean_iou: float
+    mean_fps: float
+    success_auc: Optional[float] = None
+    precision_auc: Optional[float] = None
+
+    def __str__(self) -> str:
+        parts = [
+            f"tier={self.tier}",
+            f"n={self.num_sequences}",
+            f"mIoU={self.mean_iou:.4f}",
+            f"FPS={self.mean_fps:.1f}",
+        ]
+        if self.success_auc is not None:
+            parts.append(f"AUC={self.success_auc:.4f}")
+        return "TierStats(" + "  ".join(parts) + ")"
+
+    def to_dict(self) -> Dict:
+        d: Dict = {
+            "tier": self.tier,
+            "num_sequences": self.num_sequences,
+            "mean_iou": round(self.mean_iou, 4),
+            "mean_fps": round(self.mean_fps, 2),
+        }
+        if self.success_auc is not None:
+            d["success_auc"] = round(self.success_auc, 4)
+        if self.precision_auc is not None:
+            d["precision_auc"] = round(self.precision_auc, 4)
+        return d
+
+
+class StratifiedBenchmarkReport:
+    """Difficulty-stratified accuracy breakdown for a benchmark run.
+
+    Groups :class:`~eovot.benchmark.engine.BenchmarkResult` sequences into
+    easy / medium / hard tiers using
+    :class:`SequenceDifficultyScorer`, then reports per-tier mean IoU,
+    success AUC, and FPS.  This makes it straightforward to identify whether
+    a tracker degrades specifically on challenging sequences or fails
+    uniformly across difficulty levels.
+
+    Create via :func:`stratify_benchmark_result` rather than directly.
+
+    Example::
+
+        from eovot.metrics.difficulty import stratify_benchmark_result
+
+        report = stratify_benchmark_result(benchmark_result, frame_size=(480, 640))
+        print(report.to_markdown())
+        hard = report.tier_stats["hard"]
+        print(f"Hard sequences: mIoU={hard.mean_iou:.3f}")
+    """
+
+    def __init__(
+        self,
+        tracker_name: str,
+        dataset_name: str,
+        tier_stats: Dict[str, TierStats],
+        difficulty_entries: List[SequenceDifficultyEntry],
+    ) -> None:
+        self.tracker_name = tracker_name
+        self.dataset_name = dataset_name
+        self.tier_stats: Dict[str, TierStats] = tier_stats
+        self.difficulty_entries = difficulty_entries
+
+    def __repr__(self) -> str:
+        counts = {t: self.tier_stats[t].num_sequences for t in ("easy", "medium", "hard")}
+        return (
+            f"StratifiedBenchmarkReport[{self.tracker_name} on {self.dataset_name}] "
+            f"easy={counts['easy']} medium={counts['medium']} hard={counts['hard']}"
+        )
+
+    def to_markdown(self) -> str:
+        """Render a Markdown table of per-tier accuracy and efficiency.
+
+        Returns:
+            Multi-line Markdown string with a header, table, and tier-count note.
+        """
+        lines = [
+            f"## Difficulty-Stratified Results",
+            f"**Tracker:** {self.tracker_name} &nbsp; **Dataset:** {self.dataset_name}",
+            "",
+            "| Tier   | Sequences | Mean IoU | Success AUC | FPS    |",
+            "|--------|----------:|:--------:|:-----------:|-------:|",
+        ]
+        for tier in ("easy", "medium", "hard"):
+            s = self.tier_stats[tier]
+            sauc = f"{s.success_auc:.4f}" if s.success_auc is not None else "—"
+            lines.append(
+                f"| {tier.capitalize():<6} | {s.num_sequences:>9} "
+                f"| {s.mean_iou:.4f}   | {sauc:>11} "
+                f"| {s.mean_fps:>6.1f} |"
+            )
+        counts = [self.tier_stats[t].num_sequences for t in ("easy", "medium", "hard")]
+        lines.append("")
+        lines.append(
+            f"> Tier thresholds — easy: score < {TIER_EASY_THRESHOLD}, "
+            f"hard: score ≥ {TIER_HARD_THRESHOLD}. "
+            f"Totals: easy={counts[0]}, medium={counts[1]}, hard={counts[2]}."
+        )
+        return "\n".join(lines)
+
+    def to_dict(self) -> Dict:
+        """Serialise to a nested dict for JSON export."""
+        return {
+            "tracker_name": self.tracker_name,
+            "dataset_name": self.dataset_name,
+            "tier_stats": {t: self.tier_stats[t].to_dict() for t in ("easy", "medium", "hard")},
+            "difficulty_entries": [
+                {"sequence": e.sequence_name, **e.factors.to_dict()}
+                for e in self.difficulty_entries
+            ],
+        }
+
+
+def stratify_benchmark_result(
+    benchmark_result,
+    frame_size: Optional[Tuple[int, int]] = None,
+    scorer: Optional[SequenceDifficultyScorer] = None,
+) -> StratifiedBenchmarkReport:
+    """Group a benchmark result by difficulty tier and compute per-tier statistics.
+
+    Sequences that lack ground-truth boxes in the result are assigned a
+    difficulty score of 0 and placed in the "easy" tier.
+
+    Args:
+        benchmark_result: A :class:`~eovot.benchmark.engine.BenchmarkResult`
+            with per-sequence data populated by
+            :class:`~eovot.benchmark.engine.BenchmarkEngine`.
+        frame_size: ``(height, width)`` in pixels, forwarded to
+            :class:`SequenceDifficultyScorer`.  When ``None``, the
+            ``small_target`` and ``out_of_view_risk`` factors use
+            fallback estimates (see scorer docs).
+        scorer: Optional pre-configured
+            :class:`SequenceDifficultyScorer`; when given, *frame_size*
+            is ignored.
+
+    Returns:
+        :class:`StratifiedBenchmarkReport` with per-tier ``TierStats``
+        and the full list of per-sequence difficulty entries.
+
+    Example::
+
+        from eovot.benchmark.engine import BenchmarkEngine
+        from eovot.datasets.synthetic import SyntheticDataset
+        from eovot.trackers.mosse import MOSSETracker
+        from eovot.metrics.difficulty import stratify_benchmark_result
+
+        engine = BenchmarkEngine(verbose=False)
+        result = engine.run(MOSSETracker(), SyntheticDataset(num_sequences=20),
+                            dataset_name="Synthetic")
+        report = stratify_benchmark_result(result, frame_size=(240, 320))
+        print(report.to_markdown())
+    """
+    import numpy as np
+
+    if scorer is None:
+        scorer = SequenceDifficultyScorer(frame_size=frame_size)
+
+    # Score each sequence
+    entries: List[SequenceDifficultyEntry] = []
+    seq_tier: Dict[str, str] = {}
+
+    for sr in benchmark_result.sequence_results:
+        gt = sr.ground_truths
+        if gt is not None and len(gt) >= 2:
+            factors = scorer.score(gt)
+        else:
+            factors = DifficultyFactors()  # zero score → easy tier
+        entry = SequenceDifficultyEntry(sequence_name=sr.sequence_name, factors=factors)
+        entries.append(entry)
+        seq_tier[sr.sequence_name] = _assign_tier(factors.difficulty_score)
+
+    # Group sequence results by tier
+    tier_seq_results: Dict[str, list] = {"easy": [], "medium": [], "hard": []}
+    for sr in benchmark_result.sequence_results:
+        tier = seq_tier.get(sr.sequence_name, "easy")
+        tier_seq_results[tier].append(sr)
+
+    # Compute per-tier statistics
+    tier_stats: Dict[str, TierStats] = {}
+    for tier, srs in tier_seq_results.items():
+        if not srs:
+            tier_stats[tier] = TierStats(
+                tier=tier, num_sequences=0, mean_iou=0.0, mean_fps=0.0
+            )
+            continue
+        all_ious = np.concatenate([r.ious for r in srs if len(r.ious) > 0])
+        mean_iou = float(all_ious.mean()) if len(all_ious) else 0.0
+        mean_fps = float(np.mean([r.profiling.fps for r in srs]))
+        success_aucs = [
+            r.accuracy_metrics.success_auc
+            for r in srs
+            if r.accuracy_metrics is not None
+        ]
+        precision_aucs = [
+            r.accuracy_metrics.precision_auc
+            for r in srs
+            if r.accuracy_metrics is not None
+        ]
+        tier_stats[tier] = TierStats(
+            tier=tier,
+            num_sequences=len(srs),
+            mean_iou=round(mean_iou, 4),
+            mean_fps=round(mean_fps, 2),
+            success_auc=round(float(np.mean(success_aucs)), 4) if success_aucs else None,
+            precision_auc=round(float(np.mean(precision_aucs)), 4) if precision_aucs else None,
+        )
+
+    return StratifiedBenchmarkReport(
+        tracker_name=benchmark_result.tracker_name,
+        dataset_name=benchmark_result.dataset_name,
+        tier_stats=tier_stats,
+        difficulty_entries=entries,
+    )
