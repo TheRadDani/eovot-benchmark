@@ -1,0 +1,58 @@
+# Nested tracker configuration demo
+# -----------------------------------
+# This config shows how to combine wrapper trackers (FrameSkip,
+# ResolutionScaled) with any base tracker using the "inner" key.
+#
+# Run with:
+#   python scripts/run_experiment.py configs/experiments/nested_tracker_demo.yaml
+
+experiment:
+  name: "nested-tracker-demo"
+  seed: 42
+  tdp_watts: null
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic
+  num_sequences: 5
+  num_frames: 80
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  motion: linear
+  seed: 42
+
+trackers:
+  # Baseline: plain MOSSE
+  - name: MOSSE
+    params: {}
+
+  # FrameSkip wrapper: process every 3rd frame, linear interpolation
+  - name: FrameSkip
+    params:
+      skip_rate: 3
+      mode: linear
+    inner:
+      name: MOSSE
+      params: {}
+
+  # ResolutionScaled wrapper: process at 50% resolution
+  - name: ResolutionScaled
+    params:
+      scale_factor: 0.5
+    inner:
+      name: KCF
+      params: {}
+
+  # Double-wrapped: frame-skip around a resolution-scaled tracker
+  # Processes every 2nd frame at 50% resolution — ~4× compute reduction
+  - name: FrameSkip
+    params:
+      skip_rate: 2
+      mode: repeat
+    inner:
+      name: ResolutionScaled
+      params:
+        scale_factor: 0.5
+      inner:
+        name: MOSSE
+        params: {}

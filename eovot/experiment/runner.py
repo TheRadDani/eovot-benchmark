@@ -269,13 +269,18 @@ class ExperimentRunner:
 
     @staticmethod
     def _build_tracker(cfg: Dict):
-        """Instantiate a tracker from a config dict.
+        """Instantiate a tracker (possibly a wrapper) from a config dict.
 
-        Delegates to the single shared registry in
-        :mod:`eovot.trackers.registry` so every tracker registered there
-        (including new ones) is automatically available here too.
+        Delegates to :func:`~eovot.trackers.registry.build_from_config` which
+        supports both standalone trackers and nested wrapper configs::
+
+            # Standalone
+            {"name": "KCF", "params": {"learning_rate": 0.125}}
+
+            # Wrapper with inner tracker
+            {"name": "FrameSkip", "params": {"skip_rate": 3},
+             "inner": {"name": "MOSSE", "params": {}}}
         """
-        from ..trackers.registry import build_tracker
+        from ..trackers.registry import build_from_config
 
-        params = cfg.get("params", {}) or {}
-        return build_tracker(cfg["name"], **params)
+        return build_from_config(cfg)
