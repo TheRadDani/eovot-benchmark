@@ -169,6 +169,7 @@ class BenchmarkResult:
                 "latency_p99_ms": round(p.latency_p99_ms, 3),
                 "latency_cv": round(p.latency_cv, 6),
                 "peak_memory_mb": round(p.peak_memory_mb, 2),
+                "init_latency_ms": round(p.init_latency_ms, 3),
             }
             if r.accuracy_metrics is not None:
                 entry["success_auc"] = round(r.accuracy_metrics.success_auc, 4)
@@ -285,6 +286,7 @@ class BenchmarkResult:
             lat_p95: float = float(seq.get("latency_p95_ms", lat_ms))
             lat_p99: float = float(seq.get("latency_p99_ms", lat_ms))
             lat_cv: float = float(seq.get("latency_cv", 0.0))
+            init_ms: float = float(seq.get("init_latency_ms", 0.0))
 
             profiling = ProfilingResult(
                 tracker_name=tracker_name,
@@ -296,6 +298,7 @@ class BenchmarkResult:
                 latency_p99_ms=lat_p99,
                 latency_cv=lat_cv,
                 peak_memory_mb=mem_mb,
+                init_latency_ms=init_ms,
             )
 
             accuracy: Optional[AccuracyMetrics] = None
@@ -417,7 +420,9 @@ class BenchmarkEngine:
 
         for i, frame in enumerate(frames):
             if i == 0:
+                self._profiler.start_init()
                 tracker.initialize(frame, seq.init_bbox)
+                self._profiler.end_init()
                 preds.append(seq.init_bbox)
             else:
                 self._profiler.start_frame()
