@@ -376,7 +376,7 @@ class ChallengeSyntheticDataset(BaseDataset):
                 cy = float(np.clip(cy, half_bh_max, H - half_bh_max))
 
         return _InMemorySequence(
-            name=f"challenge_scale_{idx:03d}",
+            name=f"challenge_scalechange_{idx:03d}",
             frames=frames,
             ground_truth=np.array(gt_boxes, dtype=np.float64),
         )
@@ -399,9 +399,11 @@ class ChallengeSyntheticDataset(BaseDataset):
 
         cx0 = float(rng.integers(bw, W - bw))
         cy0 = float(rng.integers(bh, H - bh))
-        # Base velocity (slow)
-        vx = float(rng.uniform(0.5, 1.5)) * float(rng.choice([-1, 1]))
-        vy = float(rng.uniform(0.3, 1.0)) * float(rng.choice([-1, 1]))
+        # Base velocity (slow); minimum 1.5 px/frame so that
+        # burst displacement (speed_factor × velocity) exceeds the
+        # fast_motion threshold (20 % of box diagonal ≈ 11.3 px for 40×40).
+        vx = float(rng.uniform(1.5, 2.5)) * float(rng.choice([-1, 1]))
+        vy = float(rng.uniform(1.5, 2.5)) * float(rng.choice([-1, 1]))
 
         background = rng.integers(40, 100, (H, W, 3), dtype=np.uint8)
         colour = tuple(int(c) for c in rng.integers(160, 256, 3))
