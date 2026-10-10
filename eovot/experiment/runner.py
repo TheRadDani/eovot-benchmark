@@ -26,6 +26,7 @@ Config schema::
 
     dataset:
       loader: OTBDataset              # OTBDataset | GOT10kDataset | LaSOTDataset
+                                      # | SyntheticDataset | ChallengeSyntheticDataset
       root: /data/OTB100
       name: OTB100                    # human-readable label in reports
       split: val                      # for GOT10k / LaSOT
@@ -156,7 +157,7 @@ class ExperimentRunner:
         if self.verbose:
             print(f"\n{'=' * 60}")
             print(f"  EXPERIMENT COMPLETE: {exp_name}")
-            print(f"  Results → {exp_dir}")
+            print(f"  Results -> {exp_dir}")
             print(f"{'=' * 60}")
             print(leaderboard)
 
@@ -230,28 +231,17 @@ class ExperimentRunner:
     def _build_dataset(cfg: Dict):
         """Instantiate a dataset from a config dict."""
         from ..datasets.base import OTBDataset
+        from ..datasets.challenge import ChallengeSyntheticDataset
         from ..datasets.got10k import GOT10kDataset
         from ..datasets.lasot import LaSOTDataset
         from ..datasets.synthetic import SyntheticDataset
 
-        loaders = {
-            "OTBDataset": OTBDataset,
-            "GOT10kDataset": GOT10kDataset,
-            "LaSOTDataset": LaSOTDataset,
-            "SyntheticDataset": SyntheticDataset,
-        }
         loader_name = cfg.get("loader", "OTBDataset")
-        if loader_name not in loaders:
-            raise ValueError(
-                f"Unknown dataset loader '{loader_name}'. "
-                f"Available: {list(loaders)}"
-            )
-        cls = loaders[loader_name]
 
         if loader_name == "SyntheticDataset":
             frame_size = cfg.get("frame_size", [320, 240])
             bbox_size = cfg.get("bbox_size", [40, 40])
-            return cls(
+            return SyntheticDataset(
                 num_sequences=cfg.get("num_sequences", 10),
                 num_frames=cfg.get("num_frames", 100),
                 frame_size=tuple(frame_size),
@@ -259,6 +249,39 @@ class ExperimentRunner:
                 motion=cfg.get("motion", "linear"),
                 seed=cfg.get("seed", 42),
             )
+
+        if loader_name == "ChallengeSyntheticDataset":
+            frame_size = cfg.get("frame_size", [320, 240])
+            base_bbox_size = cfg.get("base_bbox_size", [40, 40])
+            return ChallengeSyntheticDataset(
+                challenge=cfg.get("challenge", "occlusion"),
+                num_sequences=cfg.get("num_sequences", 5),
+                num_frames=cfg.get("num_frames", 120),
+                frame_size=tuple(frame_size),
+                base_bbox_size=tuple(base_bbox_size),
+                max_scale_factor=cfg.get("max_scale_factor", 2.5),
+                occlusion_period=cfg.get("occlusion_period", 20),
+                occlusion_duration=cfg.get("occlusion_duration", 5),
+                burst_period=cfg.get("burst_period", 20),
+                burst_duration=cfg.get("burst_duration", 3),
+                burst_speed_factor=cfg.get("burst_speed_factor", 5.0),
+                illumination_period=cfg.get("illumination_period", 25),
+                illumination_duration=cfg.get("illumination_duration", 8),
+                illumination_delta=cfg.get("illumination_delta", 80),
+                seed=cfg.get("seed", 42),
+            )
+
+        loaders = {
+            "OTBDataset": OTBDataset,
+            "GOT10kDataset": GOT10kDataset,
+            "LaSOTDataset": LaSOTDataset,
+        }
+        if loader_name not in loaders:
+            raise ValueError(
+                f"Unknown dataset loader '{loader_name}'. "
+                f"Available: {list(loaders) + ['SyntheticDataset', 'ChallengeSyntheticDataset']}"
+            )
+        cls = loaders[loader_name]
 
         root = cfg["root"]
         if loader_name == "OTBDataset":
