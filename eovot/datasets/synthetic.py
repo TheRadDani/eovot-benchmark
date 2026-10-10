@@ -9,12 +9,25 @@ download is required, making this module ideal for:
 - **Algorithm development** — quickly validate a new tracker before running
   expensive real-data experiments.
 - **Demos** — demonstrate the framework to new contributors without a dataset.
+- **Controlled challenge experiments** — generate sequences with specific VOT
+  challenge attributes (occlusion, scale variation) to study tracker behaviour
+  under precisely defined difficulty conditions.
 
 Motion patterns
 ---------------
-- ``"linear"``   — constant-velocity drift with wall-bounce.
-- ``"circular"`` — target orbits the frame centre (3 full rotations).
-- ``"random"``   — Gaussian random walk clamped to frame boundaries.
+- ``"linear"``       — constant-velocity drift with wall-bounce.
+- ``"circular"``     — target orbits the frame centre (3 full rotations).
+- ``"random"``       — Gaussian random walk clamped to frame boundaries.
+- ``"occlusion"``    — linear target motion; a rectangular occluder sweeps
+  across the frame periodically, covering the target for several frames at a
+  time.  Ground-truth boxes record the true target position even when occluded,
+  matching real benchmark annotation conventions.  Triggers the
+  ``partial_occlusion`` attribute in
+  :class:`~eovot.metrics.attributes.AttributeDetector`.
+- ``"scale_change"`` — linear target motion combined with sinusoidal
+  scale variation: the target bbox grows to ``scale_max`` × and shrinks back
+  to ``scale_min`` × its nominal size over ``scale_period`` frames.  Triggers
+  the ``scale_variation`` attribute.
 
 Usage::
 
@@ -26,6 +39,12 @@ Usage::
     engine  = BenchmarkEngine(verbose=False)
     result  = engine.run(MOSSETracker(), dataset, dataset_name="Synthetic-Linear")
     print(result)
+
+    # Controlled occlusion experiment
+    occ_ds = SyntheticDataset(num_sequences=5, num_frames=120, motion="occlusion")
+
+    # Controlled scale-change experiment
+    sc_ds  = SyntheticDataset(num_sequences=5, num_frames=120, motion="scale_change")
 """
 
 from __future__ import annotations
@@ -37,7 +56,7 @@ import numpy as np
 
 from .base import BaseDataset, Sequence
 
-MotionPattern = Literal["linear", "circular", "random"]
+MotionPattern = Literal["linear", "circular", "random", "occlusion", "scale_change"]
 
 
 class _InMemorySequence(Sequence):
@@ -100,7 +119,7 @@ class SyntheticDataset(BaseDataset):
         # synth_circular_002 (50, 4)
     """
 
-    _VALID_MOTIONS = ("linear", "circular", "random")
+    _VALID_MOTIONS = ("linear", "circular", "random", "occlusion", "scale_change")
 
     def __init__(
         self,
@@ -110,7 +129,31 @@ class SyntheticDataset(BaseDataset):
         bbox_size: Tuple[int, int] = (40, 40),
         motion: MotionPattern = "linear",
         seed: int = 42,
+        occlusion_period: int = 30,
+        occlusion_frames: int = 10,
+        scale_min: float = 0.5,
+        scale_max: float = 2.0,
+        scale_period: int = 40,
     ) -> None:
+        """
+        Args:
+            num_sequences:    Number of sequences to generate.
+            num_frames:       Frames per sequence.
+            frame_size:       ``(width, height)`` in pixels.
+            bbox_size:        Nominal ``(width, height)`` of the target.
+            motion:           Motion pattern — one of
+                              ``"linear"``, ``"circular"``, ``"random"``,
+                              ``"occlusion"``, ``"scale_change"``.
+            seed:             Base RNG seed; sequence ``i`` uses ``seed + i``.
+            occlusion_period: Frames between successive occlusion events
+                              (``"occlusion"`` pattern only).  Default: ``30``.
+            occlusion_frames: Number of consecutive frames the occluder covers
+                              the target per event.  Default: ``10``.
+            scale_min:        Minimum bbox scale factor relative to ``bbox_size``
+                              (``"scale_change"`` pattern only).  Default: ``0.5``.
+            scale_max:        Maximum bbox scale factor.  Default: ``2.0``.
+            scale_period:     Frames for one full scale oscillation.  Default: ``40``.
+        """
         if motion not in self._VALID_MOTIONS:
             raise ValueError(
                 f"Unknown motion pattern: {motion!r}. "
@@ -122,6 +165,11 @@ class SyntheticDataset(BaseDataset):
         self.bbox_size = bbox_size
         self.motion = motion
         self.seed = seed
+        self.occlusion_period = max(1, occlusion_period)
+        self.occlusion_frames = max(1, occlusion_frames)
+        self.scale_min = float(scale_min)
+        self.scale_max = float(scale_max)
+        self.scale_period = max(1, scale_period)
         self._cache: List[Optional[_InMemorySequence]] = [None] * num_sequences
 
     # ------------------------------------------------------------------
@@ -161,32 +209,110 @@ class SyntheticDataset(BaseDataset):
         cx0 = float(rng.integers(bw, W - bw))
         cy0 = float(rng.integers(bh, H - bh))
         positions = self._generate_positions(cx0, cy0, rng)
+        sizes = self._generate_sizes(len(positions))
 
         # Static noise background — varied per sequence but fixed across frames.
         background = rng.integers(40, 100, (H, W, 3), dtype=np.uint8)
         # Bright target colour distinct from the dim background.
         colour = tuple(int(c) for c in rng.integers(160, 256, 3))
+        # Occluder colour: neutral grey, clearly distinct from target.
+        occ_colour = (128, 128, 128)
 
         frames: List[np.ndarray] = []
         gt_boxes: List[Tuple[float, float, float, float]] = []
 
-        for cx, cy in positions:
+        for i, ((cx, cy), (bw_i, bh_i)) in enumerate(zip(positions, sizes)):
             frame = background.copy()
-            x1 = int(round(cx - bw / 2))
-            y1 = int(round(cy - bh / 2))
+            x1 = int(round(cx - bw_i / 2))
+            y1 = int(round(cy - bh_i / 2))
             # Clip rectangle to frame boundaries before drawing.
             x1c, y1c = max(0, x1), max(0, y1)
-            x2c, y2c = min(W, x1 + bw), min(H, y1 + bh)
+            x2c, y2c = min(W, x1 + bw_i), min(H, y1 + bh_i)
             frame[y1c:y2c, x1c:x2c] = colour
+
+            if self.motion == "occlusion":
+                self._draw_occluder(frame, i, cx, cy, bw_i, bh_i, occ_colour)
+
             frames.append(frame)
             # Ground-truth uses the un-clipped box (may extend outside frame).
-            gt_boxes.append((float(x1), float(y1), float(bw), float(bh)))
+            gt_boxes.append((float(x1), float(y1), float(bw_i), float(bh_i)))
 
         return _InMemorySequence(
             name=f"synth_{self.motion}_{idx:03d}",
             frames=frames,
             ground_truth=np.array(gt_boxes, dtype=np.float64),
         )
+
+    def _generate_sizes(
+        self, num_frames: int
+    ) -> List[Tuple[int, int]]:
+        """Return per-frame ``(bw, bh)`` tuples.
+
+        For all patterns except ``"scale_change"`` the size is constant and
+        equal to ``self.bbox_size``.  For ``"scale_change"`` the size
+        oscillates sinusoidally between ``scale_min × bbox_size`` and
+        ``scale_max × bbox_size`` over ``scale_period`` frames.
+
+        Args:
+            num_frames: Length of the sequence.
+
+        Returns:
+            List of ``num_frames`` ``(int, int)`` size tuples.
+        """
+        bw, bh = self.bbox_size
+        if self.motion != "scale_change":
+            return [(bw, bh)] * num_frames
+
+        sizes: List[Tuple[int, int]] = []
+        mid = (self.scale_min + self.scale_max) / 2.0
+        amp = (self.scale_max - self.scale_min) / 2.0
+        for i in range(num_frames):
+            scale = mid + amp * math.sin(2 * math.pi * i / self.scale_period)
+            bw_i = max(4, int(round(bw * scale)))
+            bh_i = max(4, int(round(bh * scale)))
+            sizes.append((bw_i, bh_i))
+        return sizes
+
+    def _draw_occluder(
+        self,
+        frame: np.ndarray,
+        frame_idx: int,
+        cx: float,
+        cy: float,
+        bw: int,
+        bh: int,
+        colour: Tuple[int, int, int],
+    ) -> None:
+        """Paint a rectangular occluder on top of the target when active.
+
+        The occluder is active for ``occlusion_frames`` consecutive frames out
+        of every ``occlusion_period`` frames, starting at the first full period.
+        When active it is painted centred on the target so it occludes it
+        completely, simulating a foreground object passing over the target.
+
+        The ground-truth box is **not** modified — it always records the true
+        target position, matching real benchmark annotation conventions.
+
+        Args:
+            frame:     BGR frame to paint in-place.
+            frame_idx: 0-indexed frame number within the sequence.
+            cx, cy:    Target centre coordinates.
+            bw, bh:    Target bbox dimensions.
+            colour:    BGR colour tuple for the occluder.
+        """
+        H, W = frame.shape[:2]
+        phase = frame_idx % self.occlusion_period
+        if phase >= self.occlusion_frames:
+            return  # occluder not active on this frame
+
+        # Occluder is 1.5× the target size so it fully covers it.
+        ow = int(bw * 1.5)
+        oh = int(bh * 1.5)
+        ox1 = max(0, int(round(cx - ow / 2)))
+        oy1 = max(0, int(round(cy - oh / 2)))
+        ox2 = min(W, ox1 + ow)
+        oy2 = min(H, oy1 + oh)
+        frame[oy1:oy2, ox1:ox2] = colour
 
     def _generate_positions(
         self,
@@ -200,7 +326,8 @@ class SyntheticDataset(BaseDataset):
         half_bw, half_bh = bw / 2.0, bh / 2.0
         positions: List[Tuple[float, float]] = []
 
-        if self.motion == "linear":
+        if self.motion in ("linear", "occlusion", "scale_change"):
+            # All three use constant-velocity motion with wall-bounce.
             vx = float(rng.uniform(1.0, 3.0)) * float(rng.choice([-1, 1]))
             vy = float(rng.uniform(0.5, 2.0)) * float(rng.choice([-1, 1]))
             cx, cy = cx0, cy0

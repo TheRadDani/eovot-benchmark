@@ -1,0 +1,60 @@
+# Challenge-parameterized synthetic benchmark experiment.
+#
+# Evaluates classical trackers on two new SyntheticDataset motion patterns:
+#   - occlusion:     target periodically hidden by a foreground occluder
+#   - scale_change:  target size varies sinusoidally
+#
+# No external dataset download required.  Run with:
+#
+#   python scripts/run_experiment.py configs/experiments/challenge_synthetic.yaml
+#
+# or
+#
+#   python scripts/run_benchmark.py --config configs/experiments/challenge_synthetic.yaml
+#
+# The experiment produces per-sequence IoU, AUC, FPS, and memory results for
+# each (tracker, challenge) combination, allowing direct comparison of how
+# different trackers cope with occlusion vs. scale change.
+
+experiment:
+  name: "challenge-synthetic"
+  seed: 42
+  tdp_watts: null          # set to device TDP (e.g. 6.0 for Pi 4) for energy profiling
+
+trackers:
+  - name: MOSSE
+    params: {}
+  - name: KCF
+    params: {}
+  - name: CSRT
+    params: {}
+  - name: MedianFlow
+    params: {}
+
+# Two separate dataset blocks — run the experiment script once per block,
+# or extend the runner to iterate over multiple datasets.
+# Below: occlusion challenge.  Swap motion/name for scale_change.
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-Occlusion
+  num_sequences: 20
+  num_frames: 120
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  motion: "occlusion"
+  seed: 42
+  # Occlusion parameters
+  occlusion_period: 30      # frames between occluder sweeps
+  occlusion_frames: 10      # consecutive frames the occluder is active
+
+# Uncomment to run scale-change challenge instead:
+# dataset:
+#   loader: SyntheticDataset
+#   name: Synthetic-ScaleChange
+#   num_sequences: 20
+#   num_frames: 120
+#   motion: "scale_change"
+#   scale_min: 0.5
+#   scale_max: 2.0
+#   scale_period: 40
