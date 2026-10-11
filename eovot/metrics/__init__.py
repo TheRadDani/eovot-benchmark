@@ -1,5 +1,6 @@
-"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, and attribute analysis."""
+"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, attribute analysis, and composite deployability scoring."""
 
+from .composite import CDSEntry, CompositeDeployabilityScore
 from .accuracy import (
     iou,
     center_distance,
@@ -25,6 +26,8 @@ from .statistical import (
 )
 
 __all__ = [
+    "CDSEntry",
+    "CompositeDeployabilityScore",
     "iou",
     "center_distance",
     "AccuracyMetrics",
