@@ -1,0 +1,69 @@
+# EOVOT Deployability Analysis Experiment Config
+#
+# This config is used with scripts/run_experiment.py to produce the
+# BenchmarkResult JSON files that are then analysed by:
+#
+#   python scripts/evaluate_deployability.py \
+#       results/experiments/deployability-analysis/*.json \
+#       --device rpi4 --sustained-seconds 120 \
+#       --output results/deployability_report.md
+#
+# Workflow:
+#   1. Run this experiment to collect benchmark JSON files.
+#   2. Call evaluate_deployability.py on the output directory for CDS ranking
+#      and edge device projections without re-running the benchmark.
+
+experiment:
+  name: "deployability-analysis"
+  seed: 42
+  # Set to your device's CPU TDP for real energy estimates.
+  # Common values: 6.0 = Raspberry Pi 4, 10.0 = Jetson Nano, 15.0 = laptop
+  tdp_watts: null
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-100
+  # SyntheticDataset does not require a root directory.
+  # Replace with OTBDataset / GOT10kDataset for real-data runs.
+  num_sequences: 10
+  num_frames: 100
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  motion: linear
+  seed: 42
+
+# Trackers to compare.  Add / remove entries freely — all names must be
+# registered in eovot/trackers/registry.py.
+trackers:
+  - name: MOSSE
+    params: {}
+
+  - name: KCF
+    params: {}
+
+  - name: CSRT
+    params: {}
+
+  - name: MIL
+    params: {}
+
+  - name: CamShift
+    params: {}
+
+  - name: LKOpticalFlow
+    params: {}
+
+# ---
+# After the experiment completes, run the deployability analysis:
+#
+#   python scripts/evaluate_deployability.py \
+#     results/experiments/deployability-analysis/MOSSE-Synthetic-100.json \
+#     results/experiments/deployability-analysis/KCF-Synthetic-100.json \
+#     results/experiments/deployability-analysis/CSRT-Synthetic-100.json \
+#     results/experiments/deployability-analysis/MIL-Synthetic-100.json \
+#     results/experiments/deployability-analysis/CamShift-Synthetic-100.json \
+#     results/experiments/deployability-analysis/LKOpticalFlow-Synthetic-100.json \
+#     --device rpi4 \
+#     --sustained-seconds 120 \
+#     --w-acc 0.40 --w-rob 0.20 --w-eff 0.30 --w-smooth 0.10 \
+#     --output results/experiments/deployability-analysis/deployability_report.md
