@@ -1,52 +1,45 @@
-# EOVOT Experiment: DSST vs KCF on scale-variation sequences
+# DSST vs KCF scale-adaptive comparison
+# ----------------------------------------
+# Compares the Discriminative Scale Space Tracker (DSST) against KCF on a
+# synthetic dataset with linear and circular motion patterns.  The circular
+# motion sequence has constant scale, while the linear sequence has scale
+# variation due to random velocity changes.  Use this config to verify that
+# DSST accumulates a stable scale estimate while KCF drifts on sequences
+# where the target size changes.
 #
-# Compares the scale-adaptive DSST tracker against plain KCF to quantify
-# the accuracy benefit of scale estimation on sequences with significant
-# target size change.
-#
-# Run with the multi-tracker comparison script:
-#   python scripts/compare_trackers.py \
-#     --trackers KCF DSST \
-#     --dataset-root /data/OTB100 \
-#     --dataset-name OTB100 \
-#     --output-dir results/dsst-vs-kcf/ \
-#     --tdp-watts 15.0
-#
-# Expected operating points (approximate, OTB-100, Intel Core i7):
-#   Tracker   mIoU   FPS    Notes
-#   --------  -----  -----  -------------------------------------------
-#   KCF        0.55  250+   Fixed scale; drifts on scale_variation seqs
-#   DSST       0.60  120+   Scale-adaptive; better on growing targets
-#
-# Trade-off: DSST runs ~num_scales× slower than KCF (default: 9 scale
-# candidates, so ~2–3× slower in practice due to cache efficiency).
-# On sequences without scale variation, KCF and DSST are equivalent.
+# Run with:
+#   python scripts/run_experiment.py --config configs/experiments/dsst_vs_kcf.yaml
 
 experiment:
-  name: "dsst-vs-kcf"
-  output_dir: "results/dsst-vs-kcf/"
+  name: "dsst-vs-kcf-scale"
   seed: 42
+  tdp_watts: null        # set to e.g. 6.0 to enable energy profiling
 
 dataset:
-  name: "OTB100"
-  loader: "OTBDataset"
-  root: "/data/OTB100"         # ← update to your OTB-100 path
-  max_sequences: null
+  loader: SyntheticDataset
+  num_sequences: 20
+  num_frames: 150
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  motion: "linear"       # wall-bounce motion reveals scale drift in fixed-box trackers
+  seed: 42
+  name: "Synthetic-Linear-20seq"
 
 trackers:
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+
   - name: KCF
-    params: {}
+    params:
+      learning_rate: 0.075
+      padding: 1.5
+      kernel_sigma: 0.5
+
   - name: DSST
     params:
-      num_scales: 9
-      scale_step: 1.03
-
-benchmark:
-  verbose: true
-  tdp_watts: 15.0              # laptop TDP; set to 6.0 for Raspberry Pi 4
-
-reporting:
-  formats:
-    - json
-    - csv
-  print_summary: true
+      translation_lr: 0.075
+      scale_lr: 0.025
+      padding: 1.5
+      num_scales: 17
+      scale_step: 1.02
