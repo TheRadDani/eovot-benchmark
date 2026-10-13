@@ -1,5 +1,6 @@
 """Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, and attribute analysis."""
 
+from .attribute_curves import AttributeCurve, AttributeCurveAnalyzer, AttributeCurveResult
 from .accuracy import (
     iou,
     center_distance,
@@ -25,6 +26,9 @@ from .statistical import (
 )
 
 __all__ = [
+    "AttributeCurve",
+    "AttributeCurveAnalyzer",
+    "AttributeCurveResult",
     "iou",
     "center_distance",
     "AccuracyMetrics",
