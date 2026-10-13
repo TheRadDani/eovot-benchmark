@@ -1,0 +1,52 @@
+# EOVOT Experiment: DSST vs KCF on scale-variation sequences
+#
+# Compares the scale-adaptive DSST tracker against plain KCF to quantify
+# the accuracy benefit of scale estimation on sequences with significant
+# target size change.
+#
+# Run with the multi-tracker comparison script:
+#   python scripts/compare_trackers.py \
+#     --trackers KCF DSST \
+#     --dataset-root /data/OTB100 \
+#     --dataset-name OTB100 \
+#     --output-dir results/dsst-vs-kcf/ \
+#     --tdp-watts 15.0
+#
+# Expected operating points (approximate, OTB-100, Intel Core i7):
+#   Tracker   mIoU   FPS    Notes
+#   --------  -----  -----  -------------------------------------------
+#   KCF        0.55  250+   Fixed scale; drifts on scale_variation seqs
+#   DSST       0.60  120+   Scale-adaptive; better on growing targets
+#
+# Trade-off: DSST runs ~num_scales× slower than KCF (default: 9 scale
+# candidates, so ~2–3× slower in practice due to cache efficiency).
+# On sequences without scale variation, KCF and DSST are equivalent.
+
+experiment:
+  name: "dsst-vs-kcf"
+  output_dir: "results/dsst-vs-kcf/"
+  seed: 42
+
+dataset:
+  name: "OTB100"
+  loader: "OTBDataset"
+  root: "/data/OTB100"         # ← update to your OTB-100 path
+  max_sequences: null
+
+trackers:
+  - name: KCF
+    params: {}
+  - name: DSST
+    params:
+      num_scales: 9
+      scale_step: 1.03
+
+benchmark:
+  verbose: true
+  tdp_watts: 15.0              # laptop TDP; set to 6.0 for Raspberry Pi 4
+
+reporting:
+  formats:
+    - json
+    - csv
+  print_summary: true
