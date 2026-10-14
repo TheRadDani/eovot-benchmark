@@ -1,0 +1,54 @@
+# VOT Re-initialization Protocol Experiment
+#
+# Evaluates all classical trackers using the standard VOT challenge
+# re-initialization methodology. Results are directly comparable to
+# published VOT benchmark scores.
+#
+# Usage:
+#   python scripts/run_reinit_eval.py --config configs/experiments/reinit_eval.yaml
+#
+# Or with a custom dataset:
+#   python scripts/run_reinit_eval.py \
+#     --config configs/experiments/reinit_eval.yaml \
+#     --dataset-root /data/OTB100
+
+experiment:
+  name: "reinit-eval"
+  description: "VOT re-initialization protocol on classical trackers"
+
+# Re-initialization protocol parameters
+reinit:
+  failure_threshold: 0.1   # IoU below which a frame counts as failure
+  skip_frames: 5            # VOT standard: skip 5 frames after failure
+
+# Trackers to evaluate
+trackers:
+  - name: MOSSE
+    params: {}
+  - name: KCF
+    params: {}
+  - name: CSRT
+    params: {}
+  - name: CamShift
+    params: {}
+  - name: LKOpticalFlow
+    params: {}
+
+# Dataset configuration
+dataset:
+  loader: SyntheticDataset       # Use synthetic for quick smoke test
+  name: Synthetic
+  num_sequences: 10
+  num_frames: 100
+  motion: linear
+  # For a real dataset, comment out the lines above and use:
+  # loader: OTBDataset
+  # root: /data/OTB100
+  # name: OTB100
+
+output:
+  dir: results/reinit_eval/
+  formats:
+    - json
+    - markdown
+  verbose: true
