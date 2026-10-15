@@ -1,10 +1,15 @@
-"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, and attribute analysis."""
+"""Metrics sub-package — accuracy, robustness, efficiency, composite scoring, temporal consistency, statistical testing, and attribute analysis."""
 
 from .accuracy import (
     iou,
     center_distance,
     AccuracyMetrics,
     MetricsEngine,
+)
+from .composite import (
+    CompositeScoreEngine,
+    CompositeEntry,
+    DimensionScores,
 )
 from .attributes import (
     ALL_ATTRIBUTES,
@@ -29,6 +34,9 @@ __all__ = [
     "center_distance",
     "AccuracyMetrics",
     "MetricsEngine",
+    "CompositeScoreEngine",
+    "CompositeEntry",
+    "DimensionScores",
     "ALL_ATTRIBUTES",
     "ATTRIBUTE_DESCRIPTIONS",
     "AttributeAnalyzer",
