@@ -1,0 +1,57 @@
+# Background-Aware Tracker demo experiment
+# Compares a plain KCF tracker against BackgroundAwareTracker(KCF) on the
+# synthetic dataset to quantify the accuracy–energy tradeoff at different
+# motion_threshold values.
+#
+# Run with:
+#   python scripts/run_experiment.py --config configs/experiments/background_aware_demo.yaml
+
+experiment:
+  name: background_aware_demo
+  description: >
+    Demonstrates motion-gated frame skipping via BackgroundAwareTracker.
+    Evaluates energy savings (skip ratio) vs. accuracy loss at three
+    motion_threshold levels.
+
+dataset:
+  name: synthetic
+  num_sequences: 10
+  num_frames: 200
+  seed: 42
+
+trackers:
+  - name: KCF_baseline
+    class: KCFTracker
+    params: {}
+
+  - name: KCF_BgAware_low
+    class: BackgroundAwareTracker
+    params:
+      tracker: KCFTracker
+      motion_threshold: 0.01   # very aggressive — skip nearly all static frames
+      history: 50
+      var_threshold: 16.0
+
+  - name: KCF_BgAware_mid
+    class: BackgroundAwareTracker
+    params:
+      tracker: KCFTracker
+      motion_threshold: 0.02   # default — good balance of savings vs. accuracy
+      history: 50
+      var_threshold: 16.0
+
+  - name: KCF_BgAware_high
+    class: BackgroundAwareTracker
+    params:
+      tracker: KCFTracker
+      motion_threshold: 0.05   # conservative — only skip clearly static frames
+      history: 50
+      var_threshold: 16.0
+
+profiling:
+  tdp_watts: 6.0   # Raspberry Pi 4 CPU TDP for energy estimates
+
+output:
+  save_json: true
+  save_markdown: true
+  output_dir: results/background_aware_demo
