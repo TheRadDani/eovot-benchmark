@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Type
 
+from .adaptive import AdaptiveConfig, LatencyBudgetTracker
 from .base import BaseTracker
 from .camshift import CamShiftTracker
 from .csrt import CSRTTracker
