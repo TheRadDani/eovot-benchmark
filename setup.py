@@ -27,7 +27,8 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "eovot=scripts.run_benchmark:main",
+            # Installed as `eovot` CLI; also available as `python -m eovot`.
+            "eovot=eovot.__main__:main",
         ],
     },
 )
