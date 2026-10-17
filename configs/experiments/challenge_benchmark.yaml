@@ -1,0 +1,44 @@
+# EOVOT Challenge Benchmark Configuration
+# ----------------------------------------
+# Evaluates classical trackers across all six VOT challenge scenarios
+# using the synthetic ChallengeDataset (no external data required).
+#
+# Run with:
+#   python scripts/run_experiment.py --config configs/experiments/challenge_benchmark.yaml
+#
+# Results in: results/experiments/challenge-benchmark/
+#   - leaderboard.md      — ranked by success AUC per challenge
+#   - <tracker>-<dataset>.json  — full per-sequence breakdowns
+
+experiment:
+  name: "challenge-benchmark"
+  seed: 42
+  tdp_watts: null           # set to device TDP (e.g. 6.0 for RPi4) for energy estimates
+
+dataset:
+  loader: "ChallengeDataset"
+  challenge: "occlusion"    # one of: occlusion, scale_variation, fast_motion,
+                             #         illumination_variation, distractors, motion_blur
+  num_sequences: 10
+  num_frames: 150
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  seed: 42
+  name: "Synth-Occlusion"
+  max_sequences: null
+
+trackers:
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+      sigma: 2.0
+
+  - name: KCF
+    params:
+      learning_rate: 0.075
+
+  - name: MedianFlow
+    params: {}
+
+  - name: CamShift
+    params: {}
