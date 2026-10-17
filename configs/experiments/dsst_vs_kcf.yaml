@@ -1,0 +1,112 @@
+# EOVOT Experiment: DSST vs KCF — scale adaptation benefit
+#
+# Compares the scale-adaptive DSST tracker against the fixed-scale KCF
+# baseline on a synthetic dataset with multiple motion patterns.
+#
+# Usage:
+#   python scripts/run_experiment.py --config configs/experiments/dsst_vs_kcf.yaml
+#   # or with the ExperimentRunner directly:
+#   python -c "
+#   import yaml
+#   from eovot.experiment.runner import ExperimentRunner
+#   with open('configs/experiments/dsst_vs_kcf.yaml') as f:
+#       cfg = yaml.safe_load(f)
+#   ExperimentRunner(output_dir='results/experiments').run_from_config(cfg)
+#   "
+#
+# Expected outcome:
+#   DSST achieves higher success AUC than KCF on the circular/random
+#   sequences where the apparent target size naturally varies due to
+#   perspective foreshortening.  On purely linear sequences at fixed scale
+#   the two trackers should perform similarly.
+
+experiment:
+  name: "dsst_vs_kcf"
+  seed: 42
+  tdp_watts: null          # set to e.g. 6.0 to enable CPU energy estimation
+
+dataset:
+  loader: SyntheticDataset
+  name: "Synthetic-Mixed"
+  num_sequences: 15        # 5 per motion type
+  num_frames: 120
+  frame_size: [320, 240]
+  bbox_size: [40, 30]
+  motion: "linear"         # ExperimentRunner uses a single motion; run per-motion configs below
+  seed: 42
+
+trackers:
+  - name: MOSSE
+    params: {}
+
+  - name: KCF
+    params:
+      learning_rate: 0.075
+      lambda_: 0.0001
+      padding: 1.5
+      kernel_sigma: 0.5
+
+  - name: DSST
+    params:
+      n_scales: 33
+      scale_step: 1.02
+      scale_lr: 0.025
+      translation_lr: 0.075
+      lambda_: 0.0001
+      padding: 1.0
+      scale_model_max_area: 512
+      kernel_sigma: 0.5
+
+---
+# Sub-experiment: circular motion (targets change apparent size over time)
+experiment:
+  name: "dsst_vs_kcf_circular"
+  seed: 42
+  tdp_watts: null
+
+dataset:
+  loader: SyntheticDataset
+  name: "Synthetic-Circular"
+  num_sequences: 10
+  num_frames: 150
+  frame_size: [320, 240]
+  bbox_size: [40, 30]
+  motion: "circular"
+  seed: 100
+
+trackers:
+  - name: KCF
+    params: {}
+
+  - name: DSST
+    params:
+      n_scales: 33
+      scale_step: 1.02
+      scale_lr: 0.025
+
+---
+# Sub-experiment: random motion (unpredictable trajectories)
+experiment:
+  name: "dsst_vs_kcf_random"
+  seed: 42
+  tdp_watts: null
+
+dataset:
+  loader: SyntheticDataset
+  name: "Synthetic-Random"
+  num_sequences: 10
+  num_frames: 150
+  frame_size: [320, 240]
+  bbox_size: [40, 30]
+  motion: "random"
+  seed: 200
+
+trackers:
+  - name: KCF
+    params: {}
+
+  - name: DSST
+    params:
+      n_scales: 33
+      scale_step: 1.02
+      scale_lr: 0.025
