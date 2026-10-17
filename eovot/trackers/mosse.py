@@ -14,6 +14,8 @@ Design notes
 * Uses a cosine window to reduce boundary effects in the FFT.
 * Learns the filter online with exponential moving average (EMA) update.
 * Gracefully handles partial out-of-bounds patches via ``cv2.resize``.
+* Fully-out-of-frame predictions return a zero patch so the filter
+  update is skipped, avoiding a cv2.resize crash (see issue #171).
 """
 
 from __future__ import annotations
@@ -136,9 +138,9 @@ class MOSSETracker(BaseTracker):
         y_new = y + dy
         self._bbox = [x_new, y_new, w, h]
 
-        # Online filter update with EMA
+        # Online filter update with EMA — skip when patch is fully out of frame.
         patch_new = self._extract_patch(gray, x_new, y_new, w, h)
-        if patch_new.shape == (h, w):
+        if patch_new.shape == (h, w) and patch_new.any():
             G = np.fft.fft2(self._gaussian_response(h, w))
             Fi_new = np.fft.fft2(self._preprocess(patch_new))
             H_conj_new = (G * np.conj(Fi_new)) / (Fi_new * np.conj(Fi_new) + 1e-5)
@@ -182,12 +184,24 @@ class MOSSETracker(BaseTracker):
 
         Clips coordinates to image boundaries so the patch is always
         well-defined, even when the target is partially out of frame.
+
+        When the predicted position lies *entirely* outside the frame
+        (i.e. the intersection with the image is empty), returns a
+        zero array of shape ``(h, w)``.  Callers detect this via
+        ``patch.any() == False`` and skip the filter update, preventing
+        the ``cv2.resize`` crash reported in issue #171.
         """
         ih, iw = gray.shape
         x1 = max(0, x)
         y1 = max(0, y)
         x2 = min(iw, x + w)
         y2 = min(ih, y + h)
+
+        # Target is fully outside the frame — return zeros so the caller
+        # can decide whether to skip the filter update without crashing.
+        if x2 <= x1 or y2 <= y1:
+            return np.zeros((h, w), dtype=gray.dtype)
+
         patch = gray[y1:y2, x1:x2]
         if patch.shape != (h, w):
             patch = cv2.resize(patch, (w, h), interpolation=cv2.INTER_LINEAR)
