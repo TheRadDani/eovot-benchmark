@@ -1,0 +1,55 @@
+# EOVOT ensemble tracker demonstration
+# ----------------------------------------
+# Demonstrates EnsembleTracker — a fusion of MOSSE, KCF, and CSRT — running
+# against individual component trackers on synthetic data.
+#
+# This config is designed to run without any external dataset download.
+#
+# Run with:
+#   python scripts/run_experiment.py \
+#     --config configs/experiments/ensemble_demo.yaml
+#
+# To build an ensemble programmatically:
+#
+#   from eovot.trackers.ensemble import EnsembleTracker
+#   from eovot.trackers.registry import build_tracker
+#
+#   ensemble = EnsembleTracker(
+#       base_trackers=[
+#           build_tracker("MOSSE"),
+#           build_tracker("KCF", learning_rate=0.075),
+#           build_tracker("CSRT"),
+#       ],
+#       fusion="vote",    # or "mean"
+#   )
+#
+# fusion strategies:
+#   mean — weighted centroid average of all predictions
+#   vote — select the prediction with highest mean pairwise IoU (consensus)
+
+experiment:
+  name: "ensemble-demo"
+  seed: 42
+  tdp_watts: null
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-Linear
+  motion: linear
+  num_sequences: 10
+  num_frames: 80
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  seed: 42
+
+trackers:
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+
+  - name: KCF
+    params:
+      learning_rate: 0.075
+
+  - name: CSRT
+    params: {}
