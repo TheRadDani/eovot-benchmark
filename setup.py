@@ -27,7 +27,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "eovot=scripts.run_benchmark:main",
+            "eovot=eovot.__main__:main",
         ],
     },
 )

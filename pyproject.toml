@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "eovot-benchmark"
+version = "0.1.0"
+description = "Edge-Optimized Visual Object Tracking Benchmark Suite"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+dependencies = [
+    "numpy>=1.21",
+    "opencv-python>=4.5",
+    "psutil>=5.9",
+    "pandas>=1.3",
+    "pyyaml>=6.0",
+    "tqdm>=4.62",
+]
+
+[project.optional-dependencies]
+torch = ["torch>=1.13"]
+onnx  = ["onnxruntime>=1.14"]
+dev   = ["pytest>=7.0", "pytest-cov>=4.0"]
+
+[project.scripts]
+eovot = "eovot.__main__:main"
+
+[tool.setuptools.packages.find]
+exclude = ["tests*", "scripts*", "configs*", "docs*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts   = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["eovot"]
+omit   = ["tests/*"]
