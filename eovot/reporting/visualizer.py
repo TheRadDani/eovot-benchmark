@@ -121,7 +121,8 @@ class BenchmarkVisualizer:
         for i, result in enumerate(results):
             all_ious = np.concatenate([sr.ious for sr in result.sequence_results])
             rates = np.array([(all_ious > t).mean() for t in thresholds])
-            auc = float(np.trapz(rates, thresholds))
+            _trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
+            auc = float(_trapz(rates, thresholds))
             color = _PALETTE[i % len(_PALETTE)]
             ax.plot(
                 thresholds, rates,
