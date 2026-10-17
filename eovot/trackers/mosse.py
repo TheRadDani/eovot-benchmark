@@ -136,9 +136,11 @@ class MOSSETracker(BaseTracker):
         y_new = y + dy
         self._bbox = [x_new, y_new, w, h]
 
-        # Online filter update with EMA
-        patch_new = self._extract_patch(gray, x_new, y_new, w, h)
-        if patch_new.shape == (h, w):
+        # Online filter update with EMA — skip when target is out of frame
+        # to avoid corrupting the filter with a zero-filled patch.
+        ih, iw = gray.shape
+        if (x_new + w > 0 and x_new < iw and y_new + h > 0 and y_new < ih):
+            patch_new = self._extract_patch(gray, x_new, y_new, w, h)
             G = np.fft.fft2(self._gaussian_response(h, w))
             Fi_new = np.fft.fft2(self._preprocess(patch_new))
             H_conj_new = (G * np.conj(Fi_new)) / (Fi_new * np.conj(Fi_new) + 1e-5)
@@ -181,13 +183,18 @@ class MOSSETracker(BaseTracker):
         """Extract a ``(h, w)`` patch from *gray*, resizing if needed.
 
         Clips coordinates to image boundaries so the patch is always
-        well-defined, even when the target is partially out of frame.
+        well-defined, even when the target is partially or fully out of frame.
+        Returns a zero-filled patch when the target has drifted entirely outside
+        the image (fixes cv2.resize crash on zero-dimension slices, issue #171).
         """
         ih, iw = gray.shape
         x1 = max(0, x)
         y1 = max(0, y)
         x2 = min(iw, x + w)
         y2 = min(ih, y + h)
+        if x2 <= x1 or y2 <= y1:
+            # Target has drifted completely out of frame.
+            return np.zeros((h, w), dtype=np.float32)
         patch = gray[y1:y2, x1:x2]
         if patch.shape != (h, w):
             patch = cv2.resize(patch, (w, h), interpolation=cv2.INTER_LINEAR)

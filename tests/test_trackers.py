@@ -113,3 +113,71 @@ class TestKCFTracker:
         tracker.initialize(frames[0], INIT_BBOX)
         bbox = tracker.update(frames[1])
         assert len(bbox) == 4
+
+
+class TestMOSSEOOBRobustness:
+    """Regression tests for issue #171 — tracker crash on out-of-frame bbox."""
+
+    def test_update_does_not_crash_when_target_fully_off_right(self):
+        """Target drifted completely off the right edge must not raise."""
+        tracker = MOSSETracker()
+        frame = _make_frame(h=60, w=80)
+        # Initialize with a valid bbox
+        tracker.initialize(frame, (10.0, 10.0, 20.0, 20.0))
+        # Manually force the bbox far off the right edge
+        tracker._bbox = [200, 10, 20, 20]
+        # update() must not raise; it should return a bbox tuple
+        bbox = tracker.update(frame)
+        assert len(bbox) == 4
+
+    def test_update_does_not_crash_when_target_fully_off_left(self):
+        """Target drifted completely off the left edge must not raise."""
+        tracker = MOSSETracker()
+        frame = _make_frame(h=60, w=80)
+        tracker.initialize(frame, (10.0, 10.0, 20.0, 20.0))
+        tracker._bbox = [-50, 10, 20, 20]
+        bbox = tracker.update(frame)
+        assert len(bbox) == 4
+
+    def test_update_does_not_crash_when_target_fully_off_top(self):
+        """Target drifted completely above the frame must not raise."""
+        tracker = MOSSETracker()
+        frame = _make_frame(h=60, w=80)
+        tracker.initialize(frame, (10.0, 10.0, 20.0, 20.0))
+        tracker._bbox = [10, -50, 20, 20]
+        bbox = tracker.update(frame)
+        assert len(bbox) == 4
+
+    def test_update_does_not_crash_when_target_fully_off_bottom(self):
+        """Target drifted completely below the frame must not raise."""
+        tracker = MOSSETracker()
+        frame = _make_frame(h=60, w=80)
+        tracker.initialize(frame, (10.0, 10.0, 20.0, 20.0))
+        tracker._bbox = [10, 200, 20, 20]
+        bbox = tracker.update(frame)
+        assert len(bbox) == 4
+
+    def test_extract_patch_oob_returns_correct_shape(self):
+        """_extract_patch must always return shape (h, w) even when OOB."""
+        import cv2
+        tracker = MOSSETracker()
+        gray = np.zeros((60, 80), dtype=np.uint8)
+        # Fully OOB positions
+        for x, y in [(-50, 0), (200, 0), (0, -50), (0, 200), (-50, -50)]:
+            patch = tracker._extract_patch(gray, x, y, 20, 20)
+            assert patch.shape == (20, 20), (
+                f"OOB patch at ({x},{y}) returned shape {patch.shape}, expected (20, 20)"
+            )
+
+    def test_tracker_recovers_after_drift_back_into_frame(self):
+        """Tracker resumes normal updates after the target returns in frame."""
+        tracker = MOSSETracker()
+        frame = _make_frame(h=60, w=80)
+        tracker.initialize(frame, (10.0, 10.0, 20.0, 20.0))
+        # Drive the tracker OOB
+        tracker._bbox = [200, 10, 20, 20]
+        tracker.update(frame)
+        # Now put it back in frame — should not raise
+        tracker._bbox = [10, 10, 20, 20]
+        bbox = tracker.update(frame)
+        assert len(bbox) == 4
