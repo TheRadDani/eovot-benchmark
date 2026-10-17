@@ -1,0 +1,72 @@
+# OTB-100 Attribute-Stratified Benchmark
+# ----------------------------------------
+# Evaluates all classical trackers on OTB-100 and records enough data to
+# produce per-attribute performance breakdowns after the run.
+#
+# Prerequisite:  Download OTB-100 from http://cvlab.hanyang.ac.kr/tracker_benchmark/
+#                and set `dataset.root` to the directory containing the
+#                per-sequence subdirectories (Basketball/, Biker/, …).
+#
+# Usage:
+#   python scripts/run_experiment.py \
+#       --config configs/experiments/otb100_attribute_analysis.yaml
+#
+# Attribute-targeted subset (fast motion only):
+#   Override `dataset.filter_attributes` with a list of OTB attribute codes.
+#   The run will restrict sequences to those that carry ALL listed attributes.
+#
+# OTB attribute codes:
+#   IV  – Illumination Variation    SV  – Scale Variation
+#   OCC – Occlusion                 DEF – Deformation
+#   MB  – Motion Blur               FM  – Fast Motion
+#   IPR – In-Plane Rotation         OPR – Out-of-Plane Rotation
+#   OV  – Out-of-View               BC  – Background Clutter
+#   LR  – Low Resolution
+#
+# Examples of targeted subsets:
+#   filter_attributes: ["FM"]            # ~58 fast-motion sequences
+#   filter_attributes: ["OCC"]           # ~49 occlusion sequences
+#   filter_attributes: ["OCC", "SV"]     # overlap of occlusion + scale variation
+#   filter_attributes: ["MB", "FM"]      # motion-blur and fast-motion together
+
+experiment:
+  name: "otb100_attribute_analysis"
+  description: >
+    Attribute-stratified classical tracker comparison on OTB-100.
+    Run scripts/statistical_analysis.py on the output JSON to get
+    significance tables suitable for paper appendices.
+  output_dir: "results/otb100_attribute_analysis"
+  max_sequences: null          # null = all discovered sequences
+
+dataset:
+  type: "OTB100"
+  root: "/data/OTB100"        # ← set to your local OTB-100 path
+  # Uncomment to restrict evaluation to a specific challenge subset:
+  # filter_attributes: ["FM"]
+
+trackers:
+  - name: "MOSSE"
+    params: {}
+  - name: "KCF"
+    params:
+      learning_rate: 0.075
+  - name: "CSRT"
+    params: {}
+  - name: "MIL"
+    params: {}
+  - name: "MedianFlow"
+    params: {}
+  - name: "CamShift"
+    params: {}
+
+profiling:
+  enabled: true
+  # Set to the CPU TDP (Watts) of your target edge device for energy estimates.
+  # Examples: 6.0 (Raspberry Pi 4), 10.0 (Jetson Nano), 15.0 (laptop Core i7)
+  tdp_watts: null
+
+reporting:
+  save_json: true
+  save_csv: true
+  save_markdown: true
+  plot_pareto: true
