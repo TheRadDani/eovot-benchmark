@@ -1,0 +1,36 @@
+# Degradation robustness sweep configuration.
+# Evaluates tracker accuracy and speed across six image degradation types
+# and five severity levels to quantify robustness under edge-camera conditions.
+#
+# Usage (pseudocode — integrate into your own evaluation script):
+#   from eovot.datasets.degradation import DegradationSweep, DegradationType
+#   sweep = DegradationSweep(
+#       severities=degradation_sweep.severities,
+#       types=[DegradationType(t) for t in degradation_sweep.types],
+#       rng_seed=degradation_sweep.rng_seed,
+#   )
+
+degradation_sweep:
+  severities: [0.0, 0.25, 0.5, 0.75, 1.0]
+  types:
+    - gaussian_noise
+    - motion_blur
+    - jpeg_compression
+    - brightness
+    - salt_pepper
+    - pixelation
+  rng_seed: 42
+
+dataset:
+  name: synthetic
+  num_sequences: 5
+  num_frames: 100
+  motion: linear
+
+tracker:
+  name: mosse
+
+output:
+  save_markdown: true
+  save_json: true
+  out_dir: results/degradation_sweep
