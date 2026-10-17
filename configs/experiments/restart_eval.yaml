@@ -1,0 +1,39 @@
+# Restart Protocol Evaluation
+#
+# Evaluates trackers using the VOT restart protocol: when a tracker loses
+# the target, it is penalized for `grace_period` frames then reinitialized
+# from ground truth. Produces EAO (Expected Average Overlap) alongside the
+# standard restart count, enabling fair comparison with published VOT results.
+#
+# Usage:
+#   python scripts/run_restart_eval.py --config configs/experiments/restart_eval.yaml
+
+experiment:
+  name: restart_eval_synthetic
+  output_dir: results/restart_eval
+  seed: 42
+
+dataset:
+  name: SyntheticDataset
+  loader: synthetic
+  num_sequences: 10
+  num_frames: 150
+  frame_size: [320, 240]
+  bbox_size: [40, 30]
+  motion: linear
+
+restart_protocol:
+  failure_threshold: 0.0   # IoU <= 0 triggers a restart (VOT standard)
+  grace_period: 5           # 5 penalty frames before reinit (VOT standard)
+
+trackers:
+  - name: MOSSE
+    params: {}
+  - name: KCF
+    params: {}
+  - name: CSRT
+    params: {}
+
+reporting:
+  formats: [json, markdown]
+  print_summary: true
