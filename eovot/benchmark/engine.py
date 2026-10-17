@@ -186,6 +186,12 @@ class BenchmarkResult:
                 entry["ious"] = [round(float(v), 6) for v in r.ious]
             if r.center_distances is not None and len(r.center_distances) > 0:
                 entry["center_distances"] = [round(float(v), 3) for v in r.center_distances]
+            # Raw per-frame predictions: stored so saved results can be re-exported
+            # in standard submission formats without re-running the tracker.
+            if r.predictions is not None and len(r.predictions) > 0:
+                entry["predictions"] = [
+                    [round(float(v), 4) for v in row] for row in r.predictions
+                ]
             sequences.append(entry)
         return {"summary": self.summary(), "sequences": sequences}
 
@@ -320,11 +326,16 @@ class BenchmarkResult:
                     mean_cpu_pct=float(seq.get("energy_mean_cpu_pct", 0.0)),
                 )
 
+            predictions: Optional[np.ndarray] = None
+            if "predictions" in seq:
+                predictions = np.array(seq["predictions"], dtype=np.float64)
+
             seq_results.append(
                 SequenceResult(
                     sequence_name=seq_name,
                     ious=ious,
                     profiling=profiling,
+                    predictions=predictions,
                     center_distances=dists,
                     energy=energy,
                     accuracy_metrics=accuracy,
