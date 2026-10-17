@@ -3,6 +3,7 @@
 from .profiler import Profiler, ProfilingResult
 from .energy import EnergyProfiler, EnergyResult
 from .device_sim import DeviceProfile, DeviceSimResult, DeviceSimulator, KNOWN_DEVICES
+from .gpu_profiler import GpuProfiler, GpuProfilingResult, cuda_available
 
 __all__ = [
     "Profiler",
@@ -13,4 +14,7 @@ __all__ = [
     "DeviceSimResult",
     "DeviceSimulator",
     "KNOWN_DEVICES",
+    "GpuProfiler",
+    "GpuProfilingResult",
+    "cuda_available",
 ]
