@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "eovot-benchmark"
+version = "0.1.0"
+description = "Edge-Optimized Visual Object Tracking Benchmark Suite"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+keywords = [
+    "visual-object-tracking",
+    "benchmark",
+    "edge-computing",
+    "computer-vision",
+    "deep-learning",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = [
+    "numpy>=1.21",
+    "opencv-python>=4.5",
+    "psutil>=5.9",
+    "pandas>=1.3",
+    "pyyaml>=6.0",
+    "tqdm>=4.62",
+]
+
+[project.optional-dependencies]
+torch = ["torch>=1.13"]
+onnx = ["onnxruntime>=1.14"]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[project.scripts]
+eovot = "eovot.__main__:main"
+
+[project.urls]
+"Homepage" = "https://github.com/theraddani/eovot-benchmark"
+"Bug Reports" = "https://github.com/theraddani/eovot-benchmark/issues"
+"Source" = "https://github.com/theraddani/eovot-benchmark"
+
+[tool.setuptools.packages.find]
+exclude = ["tests*", "scripts*", "configs*", "docs*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
