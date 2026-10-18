@@ -11,6 +11,8 @@ import numpy as np
 
 from ..datasets.base import BaseDataset, Sequence
 from ..metrics.accuracy import AccuracyMetrics, MetricsEngine
+from ..metrics.robustness import RobustnessAnalyzer, RobustnessResult
+from ..metrics.temporal import TemporalConsistencyAnalyzer, TemporalConsistencyResult
 from ..profiling.energy import EnergyProfiler, EnergyResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
@@ -26,6 +28,8 @@ class SequenceResult:
     center_distances: Optional[np.ndarray] = None  # shape (N,)  — per-frame centre-distance (px)
     energy: Optional[EnergyResult] = None          # energy estimate; None when TDP not configured
     accuracy_metrics: Optional[AccuracyMetrics] = None  # success AUC, precision AUC
+    robustness: Optional[RobustnessResult] = None  # failure analysis; None unless include_robustness=True
+    temporal: Optional[TemporalConsistencyResult] = None  # smoothness; None unless include_temporal=True
 
     @property
     def mean_iou(self) -> float:
@@ -116,6 +120,24 @@ class BenchmarkResult:
                 if r.accuracy_metrics is not None]
         return float(np.mean(aucs)) if aucs else None
 
+    @property
+    def mean_eao(self) -> Optional[float]:
+        """Mean Expected Average Overlap across all sequences, or ``None`` if not computed."""
+        eaos = [r.robustness.eao for r in self.sequence_results if r.robustness is not None]
+        return float(np.mean(eaos)) if eaos else None
+
+    @property
+    def total_failures(self) -> Optional[int]:
+        """Total tracking failures across all sequences, or ``None`` if not computed."""
+        counts = [r.robustness.num_failures for r in self.sequence_results if r.robustness is not None]
+        return sum(counts) if counts else None
+
+    @property
+    def mean_smoothness_score(self) -> Optional[float]:
+        """Mean temporal smoothness score ``S ∈ (0,1]`` across all sequences, or ``None``."""
+        scores = [r.temporal.smoothness_score for r in self.sequence_results if r.temporal is not None]
+        return float(np.mean(scores)) if scores else None
+
     def summary(self) -> Dict:
         d: Dict = {
             "tracker": self.tracker_name,
@@ -143,6 +165,13 @@ class BenchmarkResult:
         e_frame = self.mean_energy_per_frame_mj
         if e_frame is not None:
             d["mean_energy_per_frame_mj"] = round(e_frame, 4)
+        eao = self.mean_eao
+        if eao is not None:
+            d["mean_eao"] = round(eao, 4)
+            d["total_failures"] = self.total_failures
+        smoothness = self.mean_smoothness_score
+        if smoothness is not None:
+            d["mean_smoothness_score"] = round(smoothness, 4)
         return d
 
     def to_dict(self) -> Dict:
@@ -186,6 +215,16 @@ class BenchmarkResult:
                 entry["ious"] = [round(float(v), 6) for v in r.ious]
             if r.center_distances is not None and len(r.center_distances) > 0:
                 entry["center_distances"] = [round(float(v), 3) for v in r.center_distances]
+            if r.robustness is not None:
+                entry["robustness"] = {
+                    "num_failures": r.robustness.num_failures,
+                    "eao": round(r.robustness.eao, 4),
+                    "survival_rate": round(r.robustness.survival_rate, 4),
+                    "mean_recovery_lag": round(r.robustness.mean_recovery_lag, 2),
+                    "failure_frames": r.robustness.failure_frames,
+                }
+            if r.temporal is not None:
+                entry["temporal"] = r.temporal.to_dict()
             sequences.append(entry)
         return {"summary": self.summary(), "sequences": sequences}
 
@@ -198,6 +237,10 @@ class BenchmarkResult:
         )
         if "total_energy_j" in s:
             base += f"  energy={s['total_energy_j']} J"
+        if "mean_eao" in s:
+            base += f"  EAO={s['mean_eao']}  failures={s['total_failures']}"
+        if "mean_smoothness_score" in s:
+            base += f"  smoothness={s['mean_smoothness_score']}"
         return base
 
     # ------------------------------------------------------------------
@@ -265,6 +308,8 @@ class BenchmarkResult:
         from ..profiling.profiler import ProfilingResult
         from ..profiling.energy import EnergyResult
         from ..metrics.accuracy import AccuracyMetrics
+        from ..metrics.robustness import RobustnessResult
+        from ..metrics.temporal import TemporalConsistencyResult
 
         summary = d["summary"]
         tracker_name: str = summary.get("tracker") or summary.get("tracker_name", "unknown")
@@ -320,6 +365,34 @@ class BenchmarkResult:
                     mean_cpu_pct=float(seq.get("energy_mean_cpu_pct", 0.0)),
                 )
 
+            robustness: Optional[RobustnessResult] = None
+            if "robustness" in seq:
+                rb = seq["robustness"]
+                robustness = RobustnessResult(
+                    tracker_name=tracker_name,
+                    sequence_name=seq_name,
+                    num_failures=int(rb.get("num_failures", 0)),
+                    failure_frames=list(rb.get("failure_frames", [])),
+                    recovery_lags=[],
+                    mean_recovery_lag=float(rb.get("mean_recovery_lag", 0.0)),
+                    eao=float(rb.get("eao", 0.0)),
+                    survival_rate=float(rb.get("survival_rate", 0.0)),
+                )
+
+            temporal: Optional[TemporalConsistencyResult] = None
+            if "temporal" in seq:
+                t = seq["temporal"]
+                temporal = TemporalConsistencyResult(
+                    tracker_name=t.get("tracker_name", tracker_name),
+                    sequence_name=t.get("sequence_name", seq_name),
+                    position_jitter=float(t.get("position_jitter", 0.0)),
+                    scale_jitter=float(t.get("scale_jitter", 0.0)),
+                    velocity_outlier_ratio=float(t.get("velocity_outlier_ratio", 0.0)),
+                    smoothness_score=float(t.get("smoothness_score", 0.0)),
+                    mean_velocity_px=float(t.get("mean_velocity_px", 0.0)),
+                    num_frames=int(t.get("num_frames", 0)),
+                )
+
             seq_results.append(
                 SequenceResult(
                     sequence_name=seq_name,
@@ -328,6 +401,8 @@ class BenchmarkResult:
                     center_distances=dists,
                     energy=energy,
                     accuracy_metrics=accuracy,
+                    robustness=robustness,
+                    temporal=temporal,
                 )
             )
 
@@ -355,14 +430,37 @@ class BenchmarkEngine:
             value (Watts).  Set to the device's CPU TDP for meaningful
             estimates (e.g. ``6.0`` for Raspberry Pi 4, ``15.0`` for a
             laptop).  Default: ``None`` (energy profiling disabled).
+        include_robustness: If ``True``, run
+            :class:`~eovot.metrics.robustness.RobustnessAnalyzer` per sequence
+            and store results in :attr:`SequenceResult.robustness`.  Adds
+            failure counts, EAO, survival rate, and recovery lag to the output.
+            Default: ``False``.
+        include_temporal: If ``True``, run
+            :class:`~eovot.metrics.temporal.TemporalConsistencyAnalyzer` per
+            sequence and store results in :attr:`SequenceResult.temporal`.
+            Adds position jitter, scale jitter, velocity outlier ratio, and the
+            composite smoothness score — key metrics for edge deployment quality.
+            Default: ``False``.
     """
 
-    def __init__(self, verbose: bool = True, tdp_watts: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        verbose: bool = True,
+        tdp_watts: Optional[float] = None,
+        include_robustness: bool = False,
+        include_temporal: bool = False,
+    ) -> None:
         self.verbose = verbose
         self._metrics = MetricsEngine()
         self._profiler = Profiler()
         self._energy_profiler: Optional[EnergyProfiler] = (
             EnergyProfiler(tdp_watts=tdp_watts) if tdp_watts is not None else None
+        )
+        self._robustness_analyzer: Optional[RobustnessAnalyzer] = (
+            RobustnessAnalyzer() if include_robustness else None
+        )
+        self._temporal_analyzer: Optional[TemporalConsistencyAnalyzer] = (
+            TemporalConsistencyAnalyzer() if include_temporal else None
         )
 
     def run(
@@ -378,7 +476,12 @@ class BenchmarkEngine:
 
         if self.verbose:
             energy_tag = f"  [energy TDP={self._energy_profiler.tdp_watts}W]" if self._energy_profiler else ""
-            print(f"\nEvaluating {tracker.name} on {dataset_name} ({n} sequences){energy_tag}")
+            extra_tags = ""
+            if self._robustness_analyzer:
+                extra_tags += "  [robustness]"
+            if self._temporal_analyzer:
+                extra_tags += "  [temporal]"
+            print(f"\nEvaluating {tracker.name} on {dataset_name} ({n} sequences){energy_tag}{extra_tags}")
             print("-" * 60)
 
         for idx in range(n):
@@ -392,12 +495,20 @@ class BenchmarkEngine:
                 sauc_str = ""
                 if seq_result.accuracy_metrics is not None:
                     sauc_str = f"  AUC={seq_result.accuracy_metrics.success_auc:.3f}"
+                rob_str = ""
+                if seq_result.robustness is not None:
+                    rob_str = f"  EAO={seq_result.robustness.eao:.3f}"
+                temp_str = ""
+                if seq_result.temporal is not None:
+                    temp_str = f"  S={seq_result.temporal.smoothness_score:.3f}"
                 print(
                     f"  [{idx + 1:>3}/{n}] {seq_result.sequence_name:<30s} "
                     f"mIoU={seq_result.mean_iou:.3f}  "
                     f"FPS={seq_result.profiling.fps:.1f}"
                     f"{sauc_str}"
                     f"{energy_str}"
+                    f"{rob_str}"
+                    f"{temp_str}"
                 )
 
         if self.verbose:
@@ -449,6 +560,18 @@ class BenchmarkEngine:
             except ValueError:
                 pass  # sequence too short (0 update frames)
 
+        robustness: Optional[RobustnessResult] = None
+        if self._robustness_analyzer is not None:
+            robustness = self._robustness_analyzer.analyze_sequence(
+                ious, tracker_name=tracker.name, sequence_name=seq.name
+            )
+
+        temporal: Optional[TemporalConsistencyResult] = None
+        if self._temporal_analyzer is not None and len(preds_eval) > 0:
+            temporal = self._temporal_analyzer.analyze(
+                preds_eval, tracker_name=tracker.name, sequence_name=seq.name
+            )
+
         return SequenceResult(
             sequence_name=seq.name,
             ious=ious,
@@ -458,4 +581,6 @@ class BenchmarkEngine:
             center_distances=dists,
             energy=energy,
             accuracy_metrics=accuracy,
+            robustness=robustness,
+            temporal=temporal,
         )
