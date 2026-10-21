@@ -1,5 +1,7 @@
 from .base import BaseTracker, BBox
+from .confident_base import ConfidentBaseTracker
 from .mosse import MOSSETracker
+from .psr_mosse import PSRMOSSETracker
 from .kcf import KCFTracker
 from .csrt import CSRTTracker
 from .lk_optical_flow import LKOpticalFlowTracker
@@ -11,7 +13,9 @@ from .registry import TRACKER_REGISTRY, available_trackers, build_tracker
 __all__ = [
     "BaseTracker",
     "BBox",
+    "ConfidentBaseTracker",
     "MOSSETracker",
+    "PSRMOSSETracker",
     "KCFTracker",
     "CSRTTracker",
     "LKOpticalFlowTracker",
