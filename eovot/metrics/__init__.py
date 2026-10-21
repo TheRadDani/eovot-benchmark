@@ -1,4 +1,4 @@
-"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, and attribute analysis."""
+"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, attribute analysis, and VOT-protocol EAO."""
 
 from .accuracy import (
     iou,
@@ -23,6 +23,7 @@ from .statistical import (
     PairwiseSummary,
     StatisticalTestEngine,
 )
+from .vot_eao import VotEaoCalculator, VotEaoResult
 
 __all__ = [
     "iou",
@@ -45,4 +46,6 @@ __all__ = [
     "WilcoxonResult",
     "PairwiseSummary",
     "StatisticalTestEngine",
+    "VotEaoCalculator",
+    "VotEaoResult",
 ]
