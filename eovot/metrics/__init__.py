@@ -1,4 +1,4 @@
-"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, and attribute analysis."""
+"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, attribute analysis, and confidence calibration."""
 
 from .accuracy import (
     iou,
@@ -13,6 +13,10 @@ from .attributes import (
     AttributeDetector,
     AttributePerformanceTable,
     SequenceAttributes,
+)
+from .confidence import (
+    ConfidenceCalibrationResult,
+    ConfidenceCalibrationAnalyzer,
 )
 from .robustness import RobustnessAnalyzer, RobustnessResult
 from .efficiency import EfficiencyEntry, EfficiencyMetricsEngine
@@ -35,6 +39,8 @@ __all__ = [
     "AttributeDetector",
     "AttributePerformanceTable",
     "SequenceAttributes",
+    "ConfidenceCalibrationResult",
+    "ConfidenceCalibrationAnalyzer",
     "RobustnessAnalyzer",
     "RobustnessResult",
     "EfficiencyEntry",

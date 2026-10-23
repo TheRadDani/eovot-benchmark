@@ -23,10 +23,10 @@ from typing import Optional
 import cv2
 import numpy as np
 
-from .base import BaseTracker, BBox
+from .base import BBox, ConfidenceTracker, compute_psr
 
 
-class MOSSETracker(BaseTracker):
+class MOSSETracker(ConfidenceTracker):
     """MOSSE correlation filter tracker.
 
     Args:
@@ -72,10 +72,16 @@ class MOSSETracker(BaseTracker):
         self._H_conj: Optional[np.ndarray] = None  # conjugate of learned filter
         self._window: Optional[np.ndarray] = None   # cosine (Hann) window
         self._bbox: Optional[list] = None           # current [x, y, w, h]
+        self._last_psr: float = 0.0                 # PSR from most recent update()
 
     # ------------------------------------------------------------------ #
     # BaseTracker interface                                                #
     # ------------------------------------------------------------------ #
+
+    @property
+    def last_confidence(self) -> float:
+        """PSR from the most recent :meth:`update` call; ``0.0`` before first update."""
+        return self._last_psr
 
     def initialize(self, frame: np.ndarray, bbox: BBox) -> None:
         """Initialise the filter on the first frame.
@@ -93,6 +99,7 @@ class MOSSETracker(BaseTracker):
 
         gray = self._to_gray(frame)
         self._bbox = [x, y, w, h]
+        self._last_psr = 0.0
         self._window = np.outer(np.hanning(h), np.hanning(w)).astype(np.float32)
 
         # Desired response: Gaussian centred at patch centre
@@ -125,6 +132,9 @@ class MOSSETracker(BaseTracker):
 
         # Correlation response
         response = np.real(np.fft.ifft2(self._H_conj * Fi))
+
+        # Compute PSR before locating the peak (uses argmax internally)
+        self._last_psr = compute_psr(response)
 
         # Locate the peak
         ky, kx = np.unravel_index(response.argmax(), response.shape)
@@ -181,13 +191,17 @@ class MOSSETracker(BaseTracker):
         """Extract a ``(h, w)`` patch from *gray*, resizing if needed.
 
         Clips coordinates to image boundaries so the patch is always
-        well-defined, even when the target is partially out of frame.
+        well-defined, even when the target has drifted partially or fully
+        out of frame.  A degenerate clip (zero-area) is replaced with a
+        1×1 pixel patch before resize so ``cv2.resize`` never receives an
+        empty input.
         """
         ih, iw = gray.shape
-        x1 = max(0, x)
-        y1 = max(0, y)
-        x2 = min(iw, x + w)
-        y2 = min(ih, y + h)
+        # Clamp start coordinates inside frame; then ensure end > start.
+        x1 = min(iw - 1, max(0, x))
+        y1 = min(ih - 1, max(0, y))
+        x2 = max(x1 + 1, min(iw, x + w))
+        y2 = max(y1 + 1, min(ih, y + h))
         patch = gray[y1:y2, x1:x2]
         if patch.shape != (h, w):
             patch = cv2.resize(patch, (w, h), interpolation=cv2.INTER_LINEAR)

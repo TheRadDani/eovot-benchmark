@@ -13,10 +13,10 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 
-from .base import BaseTracker, BBox
+from .base import BBox, ConfidenceTracker, compute_psr
 
 
-class KCFTracker(BaseTracker):
+class KCFTracker(ConfidenceTracker):
     """Gaussian-kernel Correlation Filter (KCF) tracker.
 
     Extends the linear/MOSSE correlation filter with a non-linear Gaussian
@@ -68,6 +68,7 @@ class KCFTracker(BaseTracker):
         self._xf: Optional[np.ndarray] = None
         self._window: Optional[np.ndarray] = None
         self._yf: Optional[np.ndarray] = None
+        self._last_psr: float = 0.0
 
     # ------------------------------------------------------------------
     # Public BaseTracker interface
@@ -89,6 +90,7 @@ class KCFTracker(BaseTracker):
             max(1, int(round(h * (1.0 + self.padding)))),
         )
         self._pos = (cx, cy)
+        self._last_psr = 0.0
 
         sw, sh = self._search_sz
         self._window = self._hann2d(sh, sw)
@@ -99,6 +101,11 @@ class KCFTracker(BaseTracker):
         kf = self._kernel_corr(xf, xf)
         self._alphaf = self._yf / (kf + self.lambda_)
         self._xf = xf
+
+    @property
+    def last_confidence(self) -> float:
+        """PSR from the most recent :meth:`update` call; ``0.0`` before first update."""
+        return self._last_psr
 
     def update(self, frame: np.ndarray) -> BBox:
         """Track the target in a new frame.
@@ -122,6 +129,9 @@ class KCFTracker(BaseTracker):
         zf = np.fft.fft2(patch * self._window)
         kzf = self._kernel_corr(self._xf, zf)
         response = np.real(np.fft.ifft2(self._alphaf * kzf))
+
+        # Compute PSR before peak-finding (compute_psr calls argmax internally)
+        self._last_psr = compute_psr(response)
 
         dy, dx = np.unravel_index(np.argmax(response), response.shape)
         sh, sw = response.shape
