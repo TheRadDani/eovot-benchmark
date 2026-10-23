@@ -198,18 +198,18 @@ class TestFrameSkipWithEngine:
         )
         assert direct.mean_iou == pytest.approx(wrapped.mean_iou, abs=1e-3)
 
-    def test_higher_skip_rate_higher_fps(self):
+    def test_higher_skip_rate_fewer_inner_calls(self):
         engine = BenchmarkEngine(verbose=False)
         dataset = _TinyDataset(n=2)
-        r1 = engine.run(_CountingTracker(), dataset, dataset_name="Syn")
+        inner = _CountingTracker()
         r3 = engine.run(
-            FrameSkipTracker(_CountingTracker(), skip_rate=3),
+            FrameSkipTracker(inner, skip_rate=3),
             dataset,
             dataset_name="Syn",
         )
-        # skip_rate=3 should be at least as fast as skip_rate=1
-        # (on a constant tracker the overhead is negligible, allow 10% slack)
-        assert r3.mean_fps >= r1.mean_fps * 0.5
+        # skip_rate=3 must cause fewer inner updates than total frames processed
+        total_frames = sum(sr.profiling.frame_count for sr in r3.sequence_results)
+        assert inner.update_calls < total_frames
 
     def test_tracker_name_propagated(self):
         engine = BenchmarkEngine(verbose=False)

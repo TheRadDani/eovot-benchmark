@@ -1,4 +1,4 @@
-from .base import BaseTracker, BBox
+from .base import BaseTracker, BBox, ConfidenceTracker, compute_psr
 from .mosse import MOSSETracker
 from .kcf import KCFTracker
 from .csrt import CSRTTracker
@@ -11,6 +11,8 @@ from .registry import TRACKER_REGISTRY, available_trackers, build_tracker
 __all__ = [
     "BaseTracker",
     "BBox",
+    "ConfidenceTracker",
+    "compute_psr",
     "MOSSETracker",
     "KCFTracker",
     "CSRTTracker",
