@@ -1,0 +1,40 @@
+# Adaptive Confidence-Skip demo experiment
+# ----------------------------------------
+# Compares MOSSE at full rate, MOSSE with fixed frame-skip (k=2),
+# and MOSSE with AdaptiveSkipTracker — illustrating the accuracy-speed
+# tradeoff for edge deployment.
+#
+# Run with:
+#   python scripts/run_adaptive_demo.py \
+#       --config configs/experiments/adaptive_skip_demo.yaml \
+#       --synthetic
+#
+# Or against a real OTB dataset:
+#   python scripts/run_adaptive_demo.py \
+#       --config configs/experiments/adaptive_skip_demo.yaml \
+#       --dataset-root /data/OTB100
+
+experiment:
+  name: "adaptive-skip-comparison"
+  output_dir: "results/adaptive_skip/"
+  seed: 42
+
+dataset:
+  name: "Synthetic"
+  loader: "SyntheticDataset"
+  num_sequences: 10
+  num_frames: 120
+
+adaptive_skip:
+  # PSR above this → skip next frame
+  high_threshold: 7.0
+  # PSR below this → always process next frame
+  low_threshold: 4.0
+  # Safety cap: never skip more than this many frames in a row
+  max_consecutive_skips: 4
+  # Propagation mode for skipped frames: "repeat" or "linear"
+  mode: "repeat"
+
+reporting:
+  formats: ["json", "csv"]
+  print_summary: true

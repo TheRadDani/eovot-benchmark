@@ -191,13 +191,17 @@ class MOSSETracker(ConfidenceTracker):
         """Extract a ``(h, w)`` patch from *gray*, resizing if needed.
 
         Clips coordinates to image boundaries so the patch is always
-        well-defined, even when the target is partially out of frame.
+        well-defined, even when the target has drifted partially or fully
+        out of frame.  A degenerate clip (zero-area) is replaced with a
+        1×1 pixel patch before resize so ``cv2.resize`` never receives an
+        empty input.
         """
         ih, iw = gray.shape
-        x1 = max(0, x)
-        y1 = max(0, y)
-        x2 = min(iw, x + w)
-        y2 = min(ih, y + h)
+        # Clamp start coordinates inside frame; then ensure end > start.
+        x1 = min(iw - 1, max(0, x))
+        y1 = min(ih - 1, max(0, y))
+        x2 = max(x1 + 1, min(iw, x + w))
+        y2 = max(y1 + 1, min(ih, y + h))
         patch = gray[y1:y2, x1:x2]
         if patch.shape != (h, w):
             patch = cv2.resize(patch, (w, h), interpolation=cv2.INTER_LINEAR)
