@@ -188,6 +188,10 @@ class MOSSETracker(BaseTracker):
         y1 = max(0, y)
         x2 = min(iw, x + w)
         y2 = min(ih, y + h)
+        # Target entirely out of frame — return a neutral patch rather than
+        # calling cv2.resize on an empty array (raises in OpenCV ≥ 5).
+        if x1 >= x2 or y1 >= y2:
+            return np.zeros((h, w), dtype=gray.dtype)
         patch = gray[y1:y2, x1:x2]
         if patch.shape != (h, w):
             patch = cv2.resize(patch, (w, h), interpolation=cv2.INTER_LINEAR)
