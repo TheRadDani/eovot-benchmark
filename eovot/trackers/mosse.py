@@ -72,6 +72,7 @@ class MOSSETracker(BaseTracker):
         self._H_conj: Optional[np.ndarray] = None  # conjugate of learned filter
         self._window: Optional[np.ndarray] = None   # cosine (Hann) window
         self._bbox: Optional[list] = None           # current [x, y, w, h]
+        self._last_psr: float = 1.0                 # PSR from last update call
 
     # ------------------------------------------------------------------ #
     # BaseTracker interface                                                #
@@ -136,6 +137,9 @@ class MOSSETracker(BaseTracker):
         y_new = y + dy
         self._bbox = [x_new, y_new, w, h]
 
+        # Compute PSR and store for confidence()
+        self._last_psr = self._compute_psr(response)
+
         # Online filter update with EMA
         patch_new = self._extract_patch(gray, x_new, y_new, w, h)
         if patch_new.shape == (h, w):
@@ -148,6 +152,24 @@ class MOSSETracker(BaseTracker):
             )
 
         return (float(x_new), float(y_new), float(w), float(h))
+
+    def confidence(self) -> float:
+        """Return normalised PSR as a tracking confidence score in ``[0, 1]``.
+
+        PSR (Peak-to-Sidelobe Ratio) measures how sharply peaked the
+        correlation response is relative to its surroundings.  High PSR
+        (≥ 20) indicates a clear, unambiguous match; low PSR (< 7) typically
+        means the tracker has lost the target.
+
+        The raw PSR is clipped to ``[0, 40]`` and scaled to ``[0, 1]`` so
+        that the return value is compatible with the :class:`BaseTracker`
+        confidence API.
+
+        Returns:
+            Confidence score in ``[0, 1]``.
+        """
+        # Clip to a sensible PSR range: 0 → 0.0, 40 → 1.0
+        return float(min(max(self._last_psr, 0.0), 40.0) / 40.0)
 
     # ------------------------------------------------------------------ #
     # Internal helpers                                                     #
@@ -192,3 +214,35 @@ class MOSSETracker(BaseTracker):
         if patch.shape != (h, w):
             patch = cv2.resize(patch, (w, h), interpolation=cv2.INTER_LINEAR)
         return patch
+
+    @staticmethod
+    def _compute_psr(response: np.ndarray, win_size: int = 11) -> float:
+        """Compute Peak-to-Sidelobe Ratio of a correlation response map.
+
+        PSR = (peak - sidelobe_mean) / sidelobe_std
+
+        The sidelobe region excludes a ``win_size × win_size`` window centred
+        on the peak to isolate the background noise floor.
+
+        Args:
+            response: 2-D correlation response map.
+            win_size: Half-exclusion window for sidelobe region.
+
+        Returns:
+            PSR scalar.  Returns 0 if the response is constant.
+        """
+        peak_val = float(response.max())
+        ky, kx = np.unravel_index(response.argmax(), response.shape)
+        h, w = response.shape
+        mask = np.ones((h, w), dtype=bool)
+        r = win_size // 2
+        y0, y1 = max(0, ky - r), min(h, ky + r + 1)
+        x0, x1 = max(0, kx - r), min(w, kx + r + 1)
+        mask[y0:y1, x0:x1] = False
+        sidelobe = response[mask]
+        if sidelobe.size == 0:
+            return 0.0
+        std = float(sidelobe.std())
+        if std < 1e-10:
+            return 0.0
+        return float((peak_val - float(sidelobe.mean())) / std)
