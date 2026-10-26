@@ -355,12 +355,20 @@ class BenchmarkEngine:
             value (Watts).  Set to the device's CPU TDP for meaningful
             estimates (e.g. ``6.0`` for Raspberry Pi 4, ``15.0`` for a
             laptop).  Default: ``None`` (energy profiling disabled).
+        warm_up_frames: Number of leading frames executed but excluded from
+            latency statistics.  Eliminates cold-start bias caused by CPU
+            cache misses and first-inference JIT overhead.  Default: ``5``.
     """
 
-    def __init__(self, verbose: bool = True, tdp_watts: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        verbose: bool = True,
+        tdp_watts: Optional[float] = None,
+        warm_up_frames: int = 5,
+    ) -> None:
         self.verbose = verbose
         self._metrics = MetricsEngine()
-        self._profiler = Profiler()
+        self._profiler = Profiler(warm_up_frames=warm_up_frames)
         self._energy_profiler: Optional[EnergyProfiler] = (
             EnergyProfiler(tdp_watts=tdp_watts) if tdp_watts is not None else None
         )
