@@ -111,87 +111,87 @@ def _make_datasets(n_seq: int = 5):
     }
 
 
+@pytest.fixture(scope="module")
+def cross_dataset_result():
+    datasets = _make_datasets(n_seq=3)
+    ev = CrossDatasetEvaluator(verbose=False)
+    return ev.evaluate(["MOSSE", "KCF"], datasets)
+
+
 class TestCrossDatasetEvaluator:
-    @pytest.fixture(scope="class")
-    @classmethod
-    def result(cls):
-        datasets = _make_datasets(n_seq=3)
-        ev = CrossDatasetEvaluator(verbose=False)
-        return ev.evaluate(["MOSSE", "KCF"], datasets)
+    def test_result_has_correct_trackers(self, cross_dataset_result):
+        assert set(cross_dataset_result.tracker_names) == {"MOSSE", "KCF"}
 
-    def test_result_has_correct_trackers(self, result):
-        assert set(result.tracker_names) == {"MOSSE", "KCF"}
+    def test_result_has_correct_datasets(self, cross_dataset_result):
+        assert set(cross_dataset_result.dataset_names) == {"SyntheticA", "SyntheticB"}
 
-    def test_result_has_correct_datasets(self, result):
-        assert set(result.dataset_names) == {"SyntheticA", "SyntheticB"}
-
-    def test_all_summaries_present(self, result):
-        for tr in result.tracker_names:
-            for ds in result.dataset_names:
-                s = result.get(tr, ds)
+    def test_all_summaries_present(self, cross_dataset_result):
+        for tr in cross_dataset_result.tracker_names:
+            for ds in cross_dataset_result.dataset_names:
+                s = cross_dataset_result.get(tr, ds)
                 assert s is not None, f"Missing summary for {tr}/{ds}"
 
-    def test_summary_num_sequences(self, result):
-        for tr in result.tracker_names:
-            for ds in result.dataset_names:
-                s = result.get(tr, ds)
+    def test_summary_num_sequences(self, cross_dataset_result):
+        for tr in cross_dataset_result.tracker_names:
+            for ds in cross_dataset_result.dataset_names:
+                s = cross_dataset_result.get(tr, ds)
                 assert s.num_sequences == 3
 
-    def test_summary_fps_positive(self, result):
-        for tr in result.tracker_names:
-            for ds in result.dataset_names:
-                s = result.get(tr, ds)
+    def test_summary_fps_positive(self, cross_dataset_result):
+        for tr in cross_dataset_result.tracker_names:
+            for ds in cross_dataset_result.dataset_names:
+                s = cross_dataset_result.get(tr, ds)
                 assert s.mean_fps > 0
 
-    def test_summary_iou_in_range(self, result):
-        for tr in result.tracker_names:
-            for ds in result.dataset_names:
-                s = result.get(tr, ds)
+    def test_summary_iou_in_range(self, cross_dataset_result):
+        for tr in cross_dataset_result.tracker_names:
+            for ds in cross_dataset_result.dataset_names:
+                s = cross_dataset_result.get(tr, ds)
                 assert 0.0 <= s.mean_iou <= 1.0
 
-    def test_rank_correlation_matrix_diagonal_is_one(self, result):
+    def test_rank_correlation_matrix_diagonal_is_one(self, cross_dataset_result):
         ev = CrossDatasetEvaluator(verbose=False)
-        corr = ev.rank_correlation_matrix(result)
-        for ds in result.dataset_names:
+        corr = ev.rank_correlation_matrix(cross_dataset_result)
+        for ds in cross_dataset_result.dataset_names:
             assert corr[(ds, ds)] == pytest.approx(1.0)
 
-    def test_rank_correlation_matrix_symmetric(self, result):
+    def test_rank_correlation_matrix_symmetric(self, cross_dataset_result):
         ev = CrossDatasetEvaluator(verbose=False)
-        corr = ev.rank_correlation_matrix(result)
-        for a in result.dataset_names:
-            for b in result.dataset_names:
+        corr = ev.rank_correlation_matrix(cross_dataset_result)
+        for a in cross_dataset_result.dataset_names:
+            for b in cross_dataset_result.dataset_names:
                 assert corr[(a, b)] == pytest.approx(corr[(b, a)], abs=1e-9)
 
-    def test_rank_correlation_in_range(self, result):
+    def test_rank_correlation_in_range(self, cross_dataset_result):
         ev = CrossDatasetEvaluator(verbose=False)
-        corr = ev.rank_correlation_matrix(result)
-        for ds_a in result.dataset_names:
-            for ds_b in result.dataset_names:
+        corr = ev.rank_correlation_matrix(cross_dataset_result)
+        for ds_a in cross_dataset_result.dataset_names:
+            for ds_b in cross_dataset_result.dataset_names:
                 v = corr[(ds_a, ds_b)]
                 if not math.isnan(v):
                     assert -1.0 <= v <= 1.0
 
-    def test_generalization_scores_all_trackers_present(self, result):
+    def test_generalization_scores_all_trackers_present(self, cross_dataset_result):
         ev = CrossDatasetEvaluator(verbose=False)
-        scores = ev.generalization_scores(result)
-        for tr in result.tracker_names:
+        scores = ev.generalization_scores(cross_dataset_result)
+        for tr in cross_dataset_result.tracker_names:
             assert tr in scores
 
-    def test_generalization_scores_sorted_desc(self, result):
+    def test_generalization_scores_sorted_desc(self, cross_dataset_result):
         ev = CrossDatasetEvaluator(verbose=False)
-        scores = ev.generalization_scores(result)
+        scores = ev.generalization_scores(cross_dataset_result)
         vals = [v for v in scores.values() if not math.isnan(v)]
         assert vals == sorted(vals, reverse=True)
 
-    def test_markdown_report_sections_present(self, result):
+    def test_markdown_report_sections_present(self, cross_dataset_result):
         ev = CrossDatasetEvaluator(verbose=False)
-        report = ev.to_markdown_report(result)
+        report = ev.to_markdown_report(cross_dataset_result)
         assert "Cross-Dataset Accuracy Table" in report
         assert "Dataset Rank Correlation Matrix" in report
         assert "Tracker Generalization Scores" in report
-        for tr in result.tracker_names:
+        for tr in cross_dataset_result.tracker_names:
             assert tr in report
-        for ds in result.dataset_names:
+        for ds in cross_dataset_result.dataset_names:
             assert ds in report
 
 
