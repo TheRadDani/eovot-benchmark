@@ -119,6 +119,7 @@ class Profiler:
         self._warm_up_frames = warm_up_frames
         self._n_bootstrap = n_bootstrap
         self._latencies: List[float] = []
+        self._warmup_latencies: List[float] = []  # fallback when seq < warm_up_frames
         self._peak_memory_mb: float = 0.0
         self._t0: Optional[float] = None
         self._frames_seen: int = 0  # counts both warm-up and recorded frames
@@ -150,9 +151,11 @@ class Profiler:
         mem_mb = self._process.memory_info().rss / (1024 ** 2)
         self._peak_memory_mb = max(self._peak_memory_mb, mem_mb)
 
-        # Only record latency after warm-up is complete.
+        # Record latency after warm-up is complete; keep warm-up times as fallback.
         if self._frames_seen >= self._warm_up_frames:
             self._latencies.append(elapsed_ms)
+        else:
+            self._warmup_latencies.append(elapsed_ms)
 
         self._frames_seen += 1
         return elapsed_ms
@@ -164,17 +167,24 @@ class Profiler:
     def summary(self, tracker_name: str = "unknown") -> ProfilingResult:
         """Return aggregated :class:`ProfilingResult`.
 
+        When the sequence is shorter than ``warm_up_frames`` (all frames fell
+        inside the warm-up window), the profiler falls back to the warm-up
+        frames rather than raising so that short sequences in tests and edge
+        cases remain functional.  ``warm_up_frames_skipped`` is set to ``0``
+        in that case to signal that no frames were actually discarded.
+
         Raises:
-            ValueError: If no non-warm-up frames have been profiled yet.
+            ValueError: If no frames at all have been profiled.
         """
-        if not self._latencies:
-            raise ValueError(
-                f"No frames profiled after warm-up "
-                f"(warm_up_frames={self._warm_up_frames}, "
-                f"total frames seen={self._frames_seen}). "
-                "Run more frames or reduce warm_up_frames."
-            )
-        arr = np.array(self._latencies, dtype=np.float64)
+        if self._latencies:
+            arr = np.array(self._latencies, dtype=np.float64)
+            frames_skipped = min(self._warm_up_frames, self._frames_seen)
+        elif self._warmup_latencies:
+            # Sequence shorter than warm_up_frames — use all available frames.
+            arr = np.array(self._warmup_latencies, dtype=np.float64)
+            frames_skipped = 0
+        else:
+            raise ValueError("No frames profiled.")
         mean_ms = float(arr.mean())
         cv = float(arr.std() / mean_ms) if mean_ms > 0 else 0.0
         ci = _bootstrap_ci_mean(arr, n_resamples=self._n_bootstrap) if len(arr) >= 2 else (mean_ms, mean_ms)
@@ -188,13 +198,14 @@ class Profiler:
             latency_p99_ms=float(np.percentile(arr, 99)),
             latency_cv=cv,
             latency_ci_95_ms=ci,
-            warm_up_frames_skipped=min(self._warm_up_frames, self._frames_seen),
+            warm_up_frames_skipped=frames_skipped,
             peak_memory_mb=self._peak_memory_mb,
         )
 
     def reset(self) -> None:
         """Clear accumulated statistics, including the warm-up counter."""
         self._latencies.clear()
+        self._warmup_latencies.clear()
         self._peak_memory_mb = 0.0
         self._t0 = None
         self._frames_seen = 0

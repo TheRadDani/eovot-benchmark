@@ -98,24 +98,28 @@ class TestProfilerWithWarmUp:
         result = self._run(n_frames=15, warm_up=5)
         assert result.warm_up_frames_skipped == 5
 
-    def test_raises_when_all_frames_are_warm_up(self):
+    def test_fallback_when_all_frames_are_warm_up(self):
+        """When seq < warm_up_frames, profiler uses all frames rather than raising."""
         p = Profiler(warm_up_frames=10, n_bootstrap=200)
         for _ in range(5):
             p.start_frame()
             time.sleep(0.0005)
             p.end_frame()
-        with pytest.raises(ValueError, match="No frames profiled after warm-up"):
-            p.summary("tracker")
+        result = p.summary("tracker")
+        # Falls back to all 5 frames; warm_up_frames_skipped is 0 (none discarded).
+        assert result.frame_count == 5
+        assert result.warm_up_frames_skipped == 0
+        assert result.fps > 0
 
-    def test_large_warm_up_capped_at_frames_seen(self):
-        """warm_up_frames_skipped should not exceed actual frames run."""
+    def test_large_warm_up_falls_back_to_all_frames(self):
+        """warm_up_frames_skipped is 0 when sequence is shorter than warm-up window."""
         p = Profiler(warm_up_frames=100, n_bootstrap=200)
         for _ in range(20):
             p.start_frame()
             p.end_frame()
-        # All 20 frames are warm-up, so summary should raise.
-        with pytest.raises(ValueError):
-            p.summary("tracker")
+        result = p.summary("tracker")
+        assert result.frame_count == 20
+        assert result.warm_up_frames_skipped == 0
 
     def test_ci_contains_mean(self):
         result = self._run(n_frames=50, warm_up=5)
