@@ -11,6 +11,7 @@ import numpy as np
 
 from ..datasets.base import BaseDataset, Sequence
 from ..metrics.accuracy import AccuracyMetrics, MetricsEngine
+from ..metrics.got10k_protocol import GOT10kEvaluator, GOT10kSummary
 from ..profiling.energy import EnergyProfiler, EnergyResult
 from ..profiling.profiler import Profiler, ProfilingResult
 from ..trackers.base import BaseTracker
@@ -116,6 +117,19 @@ class BenchmarkResult:
                 if r.accuracy_metrics is not None]
         return float(np.mean(aucs)) if aucs else None
 
+    def got10k_metrics(self) -> GOT10kSummary:
+        """Compute GOT-10k standard metrics (AO, SR0.50, SR0.75) for this run.
+
+        Returns AO (Average Overlap), SR0.50 and SR0.75 (Success Rates at IoU
+        thresholds 0.50 and 0.75) aggregated following the official GOT-10k
+        protocol: each sequence contributes equally, regardless of length.
+
+        Returns:
+            :class:`~eovot.metrics.got10k_protocol.GOT10kSummary` with
+            ``ao``, ``sr50``, ``sr75``, and per-sequence breakdowns.
+        """
+        return GOT10kEvaluator().evaluate_benchmark(self)
+
     def summary(self) -> Dict:
         d: Dict = {
             "tracker": self.tracker_name,
@@ -137,6 +151,14 @@ class BenchmarkResult:
         npauc = self.mean_normalized_precision_auc
         if npauc is not None:
             d["normalized_precision_auc"] = round(npauc, 4)
+        # GOT-10k standard metrics (AO, SR0.50, SR0.75) — sequence-averaged
+        try:
+            g10k = self.got10k_metrics()
+            d["got10k_ao"] = round(g10k.ao, 4)
+            d["got10k_sr50"] = round(g10k.sr50, 4)
+            d["got10k_sr75"] = round(g10k.sr75, 4)
+        except Exception:
+            pass
         e_total = self.total_energy_j
         if e_total is not None:
             d["total_energy_j"] = round(e_total, 4)

@@ -1,4 +1,4 @@
-"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, and attribute analysis."""
+"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, attribute analysis, and GOT-10k protocol."""
 
 from .accuracy import (
     iou,
@@ -6,6 +6,7 @@ from .accuracy import (
     AccuracyMetrics,
     MetricsEngine,
 )
+from .got10k_protocol import GOT10kEvaluator, GOT10kSequenceResult, GOT10kSummary
 from .attributes import (
     ALL_ATTRIBUTES,
     ATTRIBUTE_DESCRIPTIONS,
@@ -25,6 +26,9 @@ from .statistical import (
 )
 
 __all__ = [
+    "GOT10kEvaluator",
+    "GOT10kSequenceResult",
+    "GOT10kSummary",
     "iou",
     "center_distance",
     "AccuracyMetrics",
