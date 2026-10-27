@@ -1,0 +1,44 @@
+# EOVOT Joint 2-D Edge Optimization Experiment
+# -----------------------------------------------
+# Sweeps all combinations of frame-skip rates and resolution-scale factors
+# to find the Pareto-optimal deployment configuration for a tracker.
+#
+# Run with:
+#   python scripts/run_joint_edge_optimization.py \
+#       --config configs/experiments/joint_edge_optimization.yaml
+#
+# Or using the synthetic dataset (no download needed):
+#   python scripts/run_joint_edge_optimization.py \
+#       --config configs/experiments/joint_edge_optimization.yaml \
+#       --synthetic --synthetic-sequences 5 --synthetic-frames 80
+
+experiment:
+  name: "joint-edge-optimization-kcf-synthetic"
+  output_dir: "results/joint_edge"
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic
+  motion: linear
+  num_sequences: 5
+  num_frames: 100
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  seed: 42
+
+tracker:
+  name: KCF
+  params:
+    learning_rate: 0.075
+
+optimization:
+  skip_rates: [1, 2, 3, 4]
+  scale_factors: [1.0, 0.75, 0.5]
+  memory_budget_mb: 512.0
+
+reporting:
+  print_ranked_table: true
+  print_grid_table: true
+  save_markdown: true
+  fps_budget: 30.0     # minimum FPS for the optimal_point query
+  min_iou: 0.0         # minimum IoU for the optimal_point query
