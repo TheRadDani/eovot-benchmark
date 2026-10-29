@@ -1,5 +1,6 @@
-"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, and attribute analysis."""
+"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, confidence analysis, statistical testing, and attribute analysis."""
 
+from .confidence import ConfidenceAnalyzer, ConfidenceResult
 from .accuracy import (
     iou,
     center_distance,
@@ -25,6 +26,8 @@ from .statistical import (
 )
 
 __all__ = [
+    "ConfidenceAnalyzer",
+    "ConfidenceResult",
     "iou",
     "center_distance",
     "AccuracyMetrics",
