@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Type
 
+from .adaptive_kcf import AdaptiveKCFTracker
 from .base import BaseTracker
 from .camshift import CamShiftTracker
 from .csrt import CSRTTracker
@@ -36,6 +37,7 @@ from .mosse import MOSSETracker
 TRACKER_REGISTRY: Dict[str, Type[BaseTracker]] = {
     "MOSSE": MOSSETracker,
     "KCF": KCFTracker,
+    "AdaptiveKCF": AdaptiveKCFTracker,
     "CSRT": CSRTTracker,
     "MIL": MILTracker,
     "MedianFlow": MedianFlowTracker,
