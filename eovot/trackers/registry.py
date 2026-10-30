@@ -43,6 +43,12 @@ TRACKER_REGISTRY: Dict[str, Type[BaseTracker]] = {
     "LKOpticalFlow": LKOpticalFlowTracker,
 }
 
+# Ensemble is built dynamically — it wraps other registered trackers rather
+# than being a class with a fixed constructor, so it gets special handling
+# in build_tracker rather than a plain entry in TRACKER_REGISTRY.
+_ENSEMBLE_KEY = "Ensemble"
+_DEFAULT_ENSEMBLE_MEMBERS = ["MOSSE", "KCF", "LKOpticalFlow"]
+
 # DaSiamRPN / NanoTracker need pre-trained ONNX files the user supplies
 # explicitly (see eovot.trackers.opencv_dl docstrings), but the registry
 # should still be able to name and construct them when params are given.
@@ -56,23 +62,51 @@ except ImportError:  # pragma: no cover - only triggered on exotic builds
 
 
 def available_trackers() -> list:
-    """Return the sorted list of tracker names known to the registry."""
-    return sorted(TRACKER_REGISTRY)
+    """Return the sorted list of tracker names known to the registry.
+
+    Includes ``"Ensemble"`` as a special entry that is handled by
+    :func:`build_tracker` rather than stored as a plain class mapping.
+    """
+    return sorted(list(TRACKER_REGISTRY) + [_ENSEMBLE_KEY])
 
 
 def build_tracker(name: str, **params: Any) -> BaseTracker:
     """Instantiate a registered tracker by name.
 
+    Supports all entries in :data:`TRACKER_REGISTRY` plus the special key
+    ``"Ensemble"``, which builds a consensus-based ensemble wrapper.
+
     Args:
-        name:   Registry key, e.g. ``"KCF"`` or ``"MIL"``.
+        name:   Registry key, e.g. ``"KCF"``, ``"MIL"``, or ``"Ensemble"``.
         params: Keyword arguments forwarded to the tracker's constructor.
+                For ``"Ensemble"``, the optional parameter ``member_names``
+                (list of str) controls which sub-trackers are included.
+                Default members: ``["MOSSE", "KCF", "MedianFlow"]``.
 
     Returns:
         A new :class:`~eovot.trackers.base.BaseTracker` instance.
 
     Raises:
         ValueError: If *name* is not a registered tracker.
+
+    Example::
+
+        # Default three-member ensemble
+        tracker = build_tracker("Ensemble")
+
+        # Custom members
+        tracker = build_tracker("Ensemble", member_names=["MOSSE", "KCF", "CSRT"])
     """
+    if name == _ENSEMBLE_KEY:
+        from .ensemble import EnsembleTracker
+
+        member_names: list = params.pop("member_names", _DEFAULT_ENSEMBLE_MEMBERS)
+        ensemble_name: str = params.pop("name", None)
+        return EnsembleTracker.from_names(
+            member_names=member_names,
+            name=ensemble_name,
+        )
+
     cls = TRACKER_REGISTRY.get(name)
     if cls is None:
         raise ValueError(

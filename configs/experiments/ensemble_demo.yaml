@@ -1,0 +1,42 @@
+# EOVOT Ensemble Tracker demo experiment
+#
+# Compares three individual classical trackers against a consensus-based
+# ensemble that runs all three in parallel and selects predictions by
+# maximising pairwise IoU agreement.
+#
+# Run with:
+#   python scripts/run_experiment.py --config configs/experiments/ensemble_demo.yaml
+#
+# Dry-run:
+#   python scripts/run_experiment.py --config configs/experiments/ensemble_demo.yaml --dry-run
+
+experiment:
+  name: "ensemble-demo"
+  seed: 42
+  tdp_watts: null    # set to your device TDP (e.g. 6.0 for Raspberry Pi 4)
+
+dataset:
+  loader: SyntheticDataset
+  num_sequences: 10
+  num_frames: 150
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  motion: linear
+  seed: 42
+  name: SyntheticLinear
+
+trackers:
+  # Individual lightweight trackers
+  - name: MOSSE
+    params: {}
+
+  - name: KCF
+    params: {}
+
+  - name: LKOpticalFlow
+    params: {}
+
+  # Consensus ensemble of the same three trackers
+  - name: Ensemble
+    params:
+      member_names: [MOSSE, KCF, LKOpticalFlow]
