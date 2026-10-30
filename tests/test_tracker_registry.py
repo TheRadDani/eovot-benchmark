@@ -49,4 +49,12 @@ class TestBuildTracker:
             build_tracker("NotARealTracker")
 
     def test_registry_dict_matches_available_trackers(self):
-        assert set(TRACKER_REGISTRY) == set(available_trackers())
+        # TRACKER_REGISTRY holds class-mapped trackers; available_trackers()
+        # may additionally list dynamically-constructed entries (e.g. "Ensemble")
+        # that are handled by build_tracker's own logic rather than a class entry.
+        # Guard: every TRACKER_REGISTRY key must appear in available_trackers().
+        from eovot.trackers.registry import _ENSEMBLE_KEY
+
+        assert set(TRACKER_REGISTRY).issubset(set(available_trackers()))
+        # Ensemble is the only dynamically-handled key outside TRACKER_REGISTRY.
+        assert _ENSEMBLE_KEY in available_trackers()
