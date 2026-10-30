@@ -46,7 +46,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..benchmark.engine import BenchmarkEngine
+from ..benchmark.engine import BenchmarkEngine, BenchmarkResult
+from ..reporting.multi_metric_report import MultiMetricReporter
 from ..reporting.reporter import BenchmarkReporter
 from .snapshot import ReproducibilitySnapshot
 
@@ -68,10 +69,12 @@ class ExperimentRunner:
         output_dir: str = "results/experiments",
         verbose: bool = True,
         resume: bool = False,
+        memory_budget_mb: float = 512.0,
     ) -> None:
         self.output_dir = Path(output_dir)
         self.verbose = verbose
         self.resume = resume
+        self.memory_budget_mb = memory_budget_mb
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -85,13 +88,18 @@ class ExperimentRunner:
                 module's docstring.  Typically loaded from YAML.
 
         Returns:
-            Dict with three keys:
+            Dict with four keys:
 
             * ``"metadata"`` — experiment name, reproducibility snapshot,
               per-tracker wall-clock timings.
             * ``"results"`` — list of per-tracker result dicts (same format
               as :meth:`~eovot.benchmark.engine.BenchmarkResult.to_dict`).
-            * ``"leaderboard"`` — Markdown string ranking trackers by mIoU.
+            * ``"leaderboard"`` — Markdown string ranking trackers by success AUC.
+            * ``"multi_metric_report"`` — dict with full accuracy, robustness,
+              temporal consistency, and efficiency metrics for every tracker,
+              as produced by :class:`~eovot.reporting.multi_metric_report.MultiMetricReporter`.
+              Written to ``multi_metric_report.md`` and ``multi_metric_report.json``
+              in the experiment directory.
         """
         exp_cfg = config.get("experiment", {})
         exp_name = exp_cfg.get("name", "unnamed-experiment")
@@ -112,6 +120,7 @@ class ExperimentRunner:
         reporter = BenchmarkReporter(output_dir=str(exp_dir))
 
         all_results: List[Dict] = []
+        live_benchmark_results: List[BenchmarkResult] = []
         run_timings: Dict[str, float] = {}
 
         for tracker_cfg in tracker_cfgs:
@@ -122,7 +131,9 @@ class ExperimentRunner:
                 if self.verbose:
                     print(f"[resume] Skipping {tracker_name} — result found at {result_path}")
                 with open(result_path) as fh:
-                    all_results.append(json.load(fh))
+                    result_dict = json.load(fh)
+                all_results.append(result_dict)
+                live_benchmark_results.append(BenchmarkResult.from_dict(result_dict))
                 continue
 
             tracker = self._build_tracker(tracker_cfg)
@@ -140,10 +151,23 @@ class ExperimentRunner:
             result_dict = result.to_dict()
             reporter.save_all(result_dict, name=f"{tracker_name}-{dataset_name}")
             all_results.append(result_dict)
+            live_benchmark_results.append(result)
 
         leaderboard = self._build_leaderboard(all_results)
         leaderboard_path = exp_dir / "leaderboard.md"
         leaderboard_path.write_text(leaderboard, encoding="utf-8")
+
+        multi_report_md = ""
+        multi_report_dict: Dict = {}
+        if live_benchmark_results:
+            mm_reporter = MultiMetricReporter(memory_budget_mb=self.memory_budget_mb)
+            summaries = mm_reporter.summarize(live_benchmark_results)
+            multi_report_md = mm_reporter.to_markdown(summaries)
+            multi_report_dict = mm_reporter.to_dict(summaries)
+            (exp_dir / "multi_metric_report.md").write_text(
+                multi_report_md, encoding="utf-8"
+            )
+            mm_reporter.save_json(summaries, str(exp_dir / "multi_metric_report.json"))
 
         metadata: Dict[str, Any] = {
             "experiment": exp_name,
@@ -159,11 +183,14 @@ class ExperimentRunner:
             print(f"  Results → {exp_dir}")
             print(f"{'=' * 60}")
             print(leaderboard)
+            if multi_report_md:
+                print(multi_report_md)
 
         return {
             "metadata": metadata,
             "results": all_results,
             "leaderboard": leaderboard,
+            "multi_metric_report": multi_report_dict,
         }
 
     # ------------------------------------------------------------------
