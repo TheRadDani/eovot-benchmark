@@ -1,0 +1,74 @@
+# Adaptive Frame-Skip Analysis — EOVOT experiment config
+#
+# Compares four latency-budget configurations of LatencyAdaptiveTracker
+# (wrapping MOSSE) against a fixed-rate FrameSkipTracker and the MOSSE
+# baseline on a synthetic dataset.
+#
+# Run with:
+#   python scripts/run_experiment.py --config configs/experiments/adaptive_skip_demo.yaml
+
+experiment:
+  name: adaptive-skip-demo
+  seed: 42
+  tdp_watts: null           # set to device TDP (e.g. 6.0 for RPi 4) to enable energy profiling
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-AdaptiveSkip
+  num_sequences: 10
+  num_frames: 200
+  motion: linear
+  max_sequences: null
+
+trackers:
+  # MOSSE baseline — full rate, no skipping
+  - name: MOSSE
+    params: {}
+
+  # Fixed-rate skip wrappers (for comparison)
+  - name: FrameSkip
+    base_tracker: MOSSE
+    skip_rate: 2
+    mode: repeat
+
+  - name: FrameSkip
+    base_tracker: MOSSE
+    skip_rate: 4
+    mode: linear
+
+  # Latency-adaptive wrappers — same underlying tracker, different budgets
+  # Budget 33.3 ms → 30 FPS target
+  - name: AdaptiveMOSSE_30fps
+    tracker_class: LatencyAdaptiveTracker
+    base_tracker: MOSSE
+    latency_budget_ms: 33.3
+    window_size: 10
+    skip_threshold_ratio: 0.8
+    max_skip: 4
+    mode: repeat
+
+  # Budget 16.7 ms → 60 FPS target (aggressive)
+  - name: AdaptiveMOSSE_60fps
+    tracker_class: LatencyAdaptiveTracker
+    base_tracker: MOSSE
+    latency_budget_ms: 16.7
+    window_size: 8
+    skip_threshold_ratio: 0.75
+    max_skip: 6
+    mode: linear
+
+  # Conservative budget 66.7 ms → 15 FPS target (IoU-preserving)
+  - name: AdaptiveMOSSE_15fps
+    tracker_class: LatencyAdaptiveTracker
+    base_tracker: MOSSE
+    latency_budget_ms: 66.7
+    window_size: 15
+    skip_threshold_ratio: 0.85
+    max_skip: 2
+    mode: repeat
+
+reporting:
+  output_dir: results/adaptive_skip_demo
+  save_json: true
+  generate_markdown: true
+  leaderboard: true

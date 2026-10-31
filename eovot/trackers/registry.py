@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Any, Dict, Type
 
 from .base import BaseTracker
+from .adaptive_skip import LatencyAdaptiveTracker
 from .camshift import CamShiftTracker
 from .csrt import CSRTTracker
 from .kcf import KCFTracker
