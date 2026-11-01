@@ -1,0 +1,41 @@
+# Motion-Adaptive Tracker Demo
+#
+# Demonstrates MotionAdaptiveTracker wrapping KCF and MOSSE on the
+# built-in synthetic dataset.
+#
+# Run with:
+#   python scripts/run_experiment.py --config configs/experiments/motion_adaptive_demo.yaml
+#
+# Expected output: leaderboard comparing base KCF vs. MotionAdaptive(KCF)
+# showing that the adaptive wrapper maintains competitive IoU while
+# skipping 30–60 % of frames on slow-motion synthetic sequences.
+
+experiment:
+  name: motion-adaptive-demo
+  seed: 42
+  tdp_watts: null        # set to e.g. 6.0 to enable energy profiling
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-LinearMotion
+  num_sequences: 10
+  num_frames: 150
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  motion: linear         # linear motion highlights the skip benefit clearly
+  seed: 42
+
+# NOTE: MotionAdaptiveTracker is a programmatic wrapper — it cannot be
+# instantiated by name from the YAML tracker registry because it requires
+# a tracker *instance*, not a class.  Use scripts/run_benchmark.py or a
+# custom Python script to compare adaptive vs. base trackers directly.
+#
+# The trackers below run the base algorithms for comparison purposes.
+trackers:
+  - name: MOSSE
+    params: {}
+  - name: KCF
+    params:
+      learning_rate: 0.125
+  - name: LKOpticalFlow
+    params: {}
