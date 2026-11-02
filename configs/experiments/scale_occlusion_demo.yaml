@@ -1,0 +1,47 @@
+# EOVOT scale-change and occlusion challenge demo
+# ------------------------------------------------
+# Evaluates KCF, CSRT, MOSSE, and MedianFlow on the two new synthetic
+# challenge motion modes:
+#
+#   - scale_change: target continuously grows and shrinks (2 full cycles)
+#   - occlusion:    target periodically hidden by a gray patch
+#
+# These patterns cover two of the most common real-world failure conditions:
+#   1. Appearance scale variation (scale_change)
+#   2. Temporary target disappearance (occlusion)
+#
+# Run with:
+#   python scripts/run_experiment.py \
+#     --config configs/experiments/scale_occlusion_demo.yaml
+#
+# Swap motion: occlusion -> motion: scale_change to test the other challenge.
+
+experiment:
+  name: "scale-occlusion-challenge"
+  seed: 42
+  tdp_watts: null
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-Occlusion
+  motion: occlusion        # change to "scale_change" to test scale variation
+  num_sequences: 10
+  num_frames: 120
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  seed: 42
+
+trackers:
+  - name: KCF
+    params:
+      learning_rate: 0.075
+
+  - name: CSRT
+    params: {}
+
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+
+  - name: MedianFlow
+    params: {}
