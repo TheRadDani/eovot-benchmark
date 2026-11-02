@@ -1,0 +1,58 @@
+# EOVOT full classical-tracker comparison on synthetic data
+# ----------------------------------------------------------
+# Evaluates all 7 built-in classical trackers on the random-motion synthetic
+# dataset.  No external dataset download required.
+#
+# Purpose:
+#   Establishes a reproducible, zero-download baseline showing each tracker's
+#   accuracy, throughput, and memory footprint on the same data.  Use this
+#   before running real-data experiments to rule out environment issues and
+#   to set expectations for relative tracker performance.
+#
+# After running, analyse IoU distributions with:
+#   python scripts/analyze_iou_distribution.py \
+#     --results results/experiments/full-tracker-comparison-synthetic/*.json \
+#     --output-dir results/analysis/iou-distributions/
+#
+# Expected ordering (approximate, on random synthetic sequences):
+#   CSRT > KCF > MOSSE > LKOpticalFlow > MedianFlow > CamShift > MIL
+
+experiment:
+  name: "full-tracker-comparison-synthetic"
+  seed: 42
+  tdp_watts: null
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic-Random
+  motion: random
+  num_sequences: 20
+  num_frames: 150
+  frame_size: [320, 240]
+  bbox_size: [40, 40]
+  seed: 42
+
+trackers:
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+
+  - name: KCF
+    params:
+      learning_rate: 0.075
+
+  - name: CSRT
+    params: {}
+
+  - name: MIL
+    params: {}
+
+  - name: MedianFlow
+    params: {}
+
+  - name: CamShift
+    params:
+      hist_bins: 16
+
+  - name: LKOpticalFlow
+    params: {}
