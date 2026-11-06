@@ -1,0 +1,37 @@
+# EOVOT — Image Degradation Robustness Analysis
+# -----------------------------------------------
+# Evaluates trackers against progressively degraded inputs to quantify
+# edge-deployment robustness.  Run with:
+#
+#   python scripts/analyze_degradation.py \
+#       --trackers MOSSE KCF CSRT \
+#       --synthetic --synthetic-sequences 5
+
+experiment:
+  name: "degradation-robustness"
+  output_dir: "results/degradation/"
+
+# Severity levels: 0.0 = clean input, 1.0 = maximum degradation.
+# More levels give a smoother curve but take proportionally longer.
+severities: [0.0, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0]
+
+# Subset of degradation types to test.
+# Comment out types you don't need to speed up the sweep.
+degradation_types:
+  - gaussian_noise       # additive noise, sigma 0–50 px
+  - gaussian_blur        # Gaussian smoothing, kernel 1–21 px
+  - jpeg_compression     # JPEG re-encode at quality 100→10
+  - brightness_reduction # multiplicative darkening, factor 1.0→0.1
+
+trackers:
+  - name: MOSSE
+  - name: KCF
+  - name: CSRT
+
+# Use the synthetic dataset for a quick baseline (no download required).
+# Replace with dataset_root to run on real data.
+dataset:
+  synthetic: true
+  num_sequences: 5
+  num_frames: 60
+  motion: "linear"
