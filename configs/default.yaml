@@ -23,6 +23,8 @@ tracker:
 benchmark:
   verbose: true                       # Print per-sequence progress
   save_predictions: false             # Save per-frame bbox predictions
+  warmup_frames: 0                    # update() calls to skip before latency recording
+                                      # (5–10 recommended for publication-quality results)
 
 reporting:
   formats: ["json", "csv"]            # Output report formats

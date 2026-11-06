@@ -103,6 +103,7 @@ def _config_from_args(args: argparse.Namespace) -> Dict:
         "benchmark": {
             "verbose": not args.quiet,
             "tdp_watts": args.tdp_watts,
+            "warmup_frames": args.warmup_frames,
         },
         "reporting": {
             "formats": ["json"],
@@ -160,6 +161,7 @@ def run_from_config(cfg: Dict) -> None:
     engine = BenchmarkEngine(
         verbose=bm_cfg.get("verbose", True),
         tdp_watts=bm_cfg.get("tdp_watts"),
+        warmup_frames=int(bm_cfg.get("warmup_frames", 0)),
     )
 
     result = engine.run(
@@ -235,6 +237,11 @@ def _build_parser() -> argparse.ArgumentParser:
                         help=(
                             "Enable CPU energy estimation with this TDP (Watts). "
                             "E.g. 6.0 for Raspberry Pi 4, 15.0 for a laptop."
+                        ))
+    parser.add_argument("--warmup-frames", type=int, default=0, metavar="N",
+                        help=(
+                            "Number of update() calls to skip before latency recording. "
+                            "Recommended: 5–10 for publication-quality latency measurements."
                         ))
 
     # Synthetic dataset mode — allows headless evaluation without any download

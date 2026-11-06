@@ -355,10 +355,32 @@ class BenchmarkEngine:
             value (Watts).  Set to the device's CPU TDP for meaningful
             estimates (e.g. ``6.0`` for Raspberry Pi 4, ``15.0`` for a
             laptop).  Default: ``None`` (energy profiling disabled).
+        warmup_frames: Number of ``update()`` calls to run *before* latency
+            recording begins.  The tracker still processes these frames
+            (predictions are recorded for accuracy), but their timing is
+            excluded from the profiling summary.
+
+            Python and OpenCV initialize thread pools, NumPy allocates
+            workspace buffers, and OS page-faults occur on first access —
+            all of which inflate the latency of the very first few frames.
+            Skipping ``warmup_frames`` update calls gives a steady-state
+            measurement that better represents continuous edge-deployment
+            throughput.
+
+            Recommended values: ``5`` for a quick warm-up, ``10`` for a
+            conservative one.  Default: ``0`` (no warm-up, backward-compatible).
     """
 
-    def __init__(self, verbose: bool = True, tdp_watts: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        verbose: bool = True,
+        tdp_watts: Optional[float] = None,
+        warmup_frames: int = 0,
+    ) -> None:
+        if warmup_frames < 0:
+            raise ValueError(f"warmup_frames must be >= 0, got {warmup_frames}")
         self.verbose = verbose
+        self.warmup_frames = warmup_frames
         self._metrics = MetricsEngine()
         self._profiler = Profiler()
         self._energy_profiler: Optional[EnergyProfiler] = (
@@ -378,7 +400,8 @@ class BenchmarkEngine:
 
         if self.verbose:
             energy_tag = f"  [energy TDP={self._energy_profiler.tdp_watts}W]" if self._energy_profiler else ""
-            print(f"\nEvaluating {tracker.name} on {dataset_name} ({n} sequences){energy_tag}")
+            warmup_tag = f"  [warmup={self.warmup_frames} fr]" if self.warmup_frames > 0 else ""
+            print(f"\nEvaluating {tracker.name} on {dataset_name} ({n} sequences){energy_tag}{warmup_tag}")
             print("-" * 60)
 
         for idx in range(n):
@@ -420,13 +443,19 @@ class BenchmarkEngine:
                 tracker.initialize(frame, seq.init_bbox)
                 preds.append(seq.init_bbox)
             else:
-                self._profiler.start_frame()
-                if self._energy_profiler is not None:
-                    self._energy_profiler.start_frame()
+                # update_idx is 0-based among all update() calls (frame index - 1).
+                # Calls with update_idx < warmup_frames are executed but not timed.
+                update_idx = i - 1
+                profile_this = update_idx >= self.warmup_frames
+                if profile_this:
+                    self._profiler.start_frame()
+                    if self._energy_profiler is not None:
+                        self._energy_profiler.start_frame()
                 bbox = tracker.update(frame)
-                self._profiler.end_frame()
-                if self._energy_profiler is not None:
-                    self._energy_profiler.end_frame()
+                if profile_this:
+                    self._profiler.end_frame()
+                    if self._energy_profiler is not None:
+                        self._energy_profiler.end_frame()
                 preds.append(bbox)
 
         preds_arr = np.array(preds, dtype=np.float64)
