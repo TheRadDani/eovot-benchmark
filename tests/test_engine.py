@@ -209,3 +209,63 @@ class TestBenchmarkEngine:
         result = self.engine.run(tracker, self.dataset, dataset_name="Synthetic")
         assert result.mean_center_distance is not None
         assert result.mean_center_distance > 0.0
+
+
+class TestBenchmarkEngineWarmup:
+    """Tests for the warmup_frames latency-exclusion feature."""
+
+    def _make_dataset(self, n_frames: int = 30) -> SyntheticDataset:
+        seqs = [SyntheticSequence(f"seq_{i}", n_frames, FIXED_BOX) for i in range(2)]
+
+        class _DS(BaseDataset):
+            def __len__(self):
+                return len(seqs)
+
+            def __getitem__(self, idx):
+                return seqs[idx]
+
+        return _DS()
+
+    def test_warmup_zero_is_backward_compatible(self):
+        """warmup_frames=0 must produce the same behaviour as the old default."""
+        engine = BenchmarkEngine(verbose=False, warmup_frames=0)
+        result = engine.run(ConstantTracker(), self._make_dataset(), dataset_name="S")
+        assert result.mean_fps > 0
+
+    def test_warmup_frames_accepted(self):
+        """Engine accepts warmup_frames without raising."""
+        engine = BenchmarkEngine(verbose=False, warmup_frames=5)
+        result = engine.run(ConstantTracker(), self._make_dataset(n_frames=20), dataset_name="S")
+        assert isinstance(result, BenchmarkResult)
+
+    def test_warmup_does_not_affect_iou(self):
+        """Accuracy metrics must be identical regardless of warmup_frames."""
+        ds = self._make_dataset(n_frames=25)
+        engine_no_warmup = BenchmarkEngine(verbose=False, warmup_frames=0)
+        engine_warmup = BenchmarkEngine(verbose=False, warmup_frames=5)
+        r0 = engine_no_warmup.run(ConstantTracker(), ds, dataset_name="S")
+        r5 = engine_warmup.run(ConstantTracker(), ds, dataset_name="S")
+        assert r0.mean_iou == pytest.approx(r5.mean_iou)
+
+    def test_warmup_does_not_affect_prediction_count(self):
+        """All frames are still predicted; warm-up only controls timing."""
+        n_frames = 20
+        ds = self._make_dataset(n_frames=n_frames)
+        engine = BenchmarkEngine(verbose=False, warmup_frames=5)
+        result = engine.run(ConstantTracker(), ds, dataset_name="S")
+        for sr in result.sequence_results:
+            assert len(sr.ious) == n_frames
+
+    def test_warmup_negative_raises(self):
+        """Negative warmup_frames must raise ValueError."""
+        with pytest.raises(ValueError, match="warmup_frames"):
+            BenchmarkEngine(verbose=False, warmup_frames=-1)
+
+    def test_warmup_exceeds_sequence_length_raises(self):
+        """When warmup_frames >= all update frames, the profiler has no samples."""
+        n_frames = 5  # 1 init + 4 updates
+        ds = self._make_dataset(n_frames=n_frames)
+        # warmup_frames=4 means all 4 updates are skipped — profiler is empty
+        engine = BenchmarkEngine(verbose=False, warmup_frames=4)
+        with pytest.raises(ValueError):
+            engine.run(ConstantTracker(), ds, dataset_name="S")
