@@ -1,0 +1,55 @@
+# EOVOT Adaptive Latency Budget Experiment
+# -----------------------------------------
+# Compares a base tracker against its AdaptiveLatencyTracker wrapper across
+# multiple FPS budgets to quantify the accuracy–throughput trade-off under
+# dynamic adaptation.
+#
+# Run with:
+#   python scripts/run_experiment.py --config configs/experiments/adaptive_budget.yaml
+#
+# Results show how the adaptive controller adjusts skip_rate in real-time
+# to meet the target FPS budget, and what accuracy is sacrificed per budget.
+
+experiment:
+  name: "adaptive-latency-budget"
+  seed: 42
+  # Set tdp_watts to your CPU's TDP for energy estimates.
+  # Typical values: Raspberry Pi 4 = 6.0 W, Jetson Nano = 10.0 W
+  tdp_watts: null
+
+dataset:
+  loader: SyntheticDataset
+  name: Synthetic
+  # SyntheticDataset parameters (no external data needed)
+  num_sequences: 10
+  num_frames: 200
+  motion: "random"            # linear | circular | random
+  max_sequences: null
+
+trackers:
+  # Baseline — full-rate tracker (no adaptation)
+  - name: MOSSE
+    params:
+      learning_rate: 0.125
+
+  # Adaptive wrappers at increasing FPS tightness
+  # NOTE: AdaptiveLatencyTracker is constructed programmatically;
+  #       this config entry documents the intended setup for reference.
+  #       Use scripts/run_benchmark.py --adaptive --target-fps 60 to invoke.
+  - name: KCF
+    params:
+      learning_rate: 0.125
+
+reporting:
+  formats: ["json", "csv"]
+  print_summary: true
+
+# Adaptive tracker parameters (read by scripts/run_benchmark.py --adaptive)
+adaptive:
+  base_tracker: MOSSE
+  target_fps_values: [15, 30, 60, 120]   # budgets to sweep
+  min_skip: 1
+  max_skip: 8
+  ema_alpha: 0.10
+  slack: 0.75
+  warmup_frames: 5

@@ -45,6 +45,12 @@ TRACKER_REGISTRY: Dict[str, Type[BaseTracker]] = {
     "KalmanColor": KalmanColorTracker,
 }
 
+# AdaptiveLatencyTracker is a wrapper, not a standalone tracker, so it is not
+# registered by name — callers construct it directly around a base tracker.
+# It is imported here so ``from eovot.trackers import AdaptiveLatencyTracker``
+# works at the package level.
+from .adaptive import AdaptiveLatencyTracker  # noqa: F401, E402
+
 # DaSiamRPN / NanoTracker need pre-trained ONNX files the user supplies
 # explicitly (see eovot.trackers.opencv_dl docstrings), but the registry
 # should still be able to name and construct them when params are given.
