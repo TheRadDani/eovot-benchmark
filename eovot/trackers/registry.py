@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Type
 
+from .background_subtraction import BackgroundSubtractionTracker
 from .base import BaseTracker
 from .camshift import CamShiftTracker
 from .csrt import CSRTTracker
@@ -43,6 +44,7 @@ TRACKER_REGISTRY: Dict[str, Type[BaseTracker]] = {
     "CamShift": CamShiftTracker,
     "LKOpticalFlow": LKOpticalFlowTracker,
     "KalmanColor": KalmanColorTracker,
+    "BGSub": BackgroundSubtractionTracker,
 }
 
 # DaSiamRPN / NanoTracker need pre-trained ONNX files the user supplies

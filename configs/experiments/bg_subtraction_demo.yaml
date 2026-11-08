@@ -1,0 +1,54 @@
+# BGSub benchmark demo — compares BackgroundSubtractionTracker against
+# CamShift and MOSSE on a synthetic linear-motion sequence.
+#
+# Run with:
+#   python scripts/run_experiment.py \
+#       --config configs/experiments/bg_subtraction_demo.yaml \
+#       --output-dir results/bg_subtraction_demo \
+#       --synthetic
+#
+# Or with a real OTB-100 dataset root:
+#   python scripts/run_experiment.py \
+#       --config configs/experiments/bg_subtraction_demo.yaml \
+#       --output-dir results/bg_subtraction_demo \
+#       --dataset-root /data/OTB100
+
+dataset:
+  name: SyntheticDataset
+  params:
+    num_sequences: 6
+    frames_per_sequence: 100
+    frame_size: [480, 320]
+    motion_pattern: linear
+
+trackers:
+  - name: BGSub
+    params:
+      history: 100
+      var_threshold: 16.0
+      detect_shadows: true
+      morph_kernel_size: 5
+      min_blob_ratio: 0.05
+
+  - name: BGSub_tight
+    class: BGSub
+    params:
+      history: 50
+      var_threshold: 8.0
+      detect_shadows: false
+      morph_kernel_size: 3
+      min_blob_ratio: 0.15
+
+  - name: CamShift
+    params: {}
+
+  - name: MOSSE
+    params: {}
+
+benchmark:
+  verbose: true
+  tdp_watts: null       # set to device TDP (e.g. 6.0 for Raspberry Pi 4) for energy profiling
+
+experiment:
+  primary_metric: mean_iou
+  save_per_sequence: true
