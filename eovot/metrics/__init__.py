@@ -1,10 +1,14 @@
-"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, and attribute analysis."""
+"""Metrics sub-package — accuracy, robustness, efficiency, temporal consistency, statistical testing, attribute analysis, and SLA compliance."""
 
 from .accuracy import (
     iou,
     center_distance,
     AccuracyMetrics,
     MetricsEngine,
+)
+from .latency_budget_planner import (
+    LatencyBudgetPlanner,
+    SLAComplianceResult,
 )
 from .attributes import (
     ALL_ATTRIBUTES,
@@ -29,6 +33,8 @@ __all__ = [
     "center_distance",
     "AccuracyMetrics",
     "MetricsEngine",
+    "LatencyBudgetPlanner",
+    "SLAComplianceResult",
     "ALL_ATTRIBUTES",
     "ATTRIBUTE_DESCRIPTIONS",
     "AttributeAnalyzer",
